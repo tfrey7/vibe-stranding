@@ -33,6 +33,10 @@
                     class="dev.tfrey.vibestranding.ResumeStrandAction"
                     text="Resume Strand..."
                     description="Open a terminal tab for an existing strand, running 'claude --continue' to pick up its last session"/>
+            <action id="VibeStranding.OpenInIde"
+                    class="dev.tfrey.vibestranding.OpenStrandInIdeAction"
+                    text="Open Strand in IDE..."
+                    description="Open a strand's worktree as a project in a new IDE window"/>
             <separator/>
             <action id="VibeStranding.FinishThis"
                     class="dev.tfrey.vibestranding.FinishThisStrandAction"

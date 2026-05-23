@@ -1,5 +1,7 @@
 package dev.tfrey.vibestranding
 
+import com.intellij.ide.impl.OpenProjectTask
+import com.intellij.ide.impl.ProjectUtil
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.AnAction
@@ -12,6 +14,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.wm.ToolWindowManager
+import kotlin.io.path.exists
 import kotlin.math.abs
 
 internal val STRAND_NAME = Regex("^[a-z0-9][a-z0-9-]*$")
@@ -20,8 +23,10 @@ internal val STRAND_NAME = Regex("^[a-z0-9][a-z0-9-]*$")
 internal const val STRAND_COMMAND = "claude"
 
 // What runs when reopening a tab for an existing strand. `--continue` picks
-// up the most recent claude session in that worktree without a picker.
-internal const val RESUME_COMMAND = "claude --continue"
+// up the most recent claude session in that worktree without a picker; the
+// `|| claude` fallback handles strands with no prior session (e.g. created
+// then closed without interacting), where `--continue` would otherwise error.
+internal const val RESUME_COMMAND = "claude --continue || claude"
 
 // Fallback emoji palette used only when claude isn't available to pick a
 // semantic one. Hash-based so retries on the same description get the same
@@ -249,6 +254,26 @@ class DeleteStrandAction : AnAction() {
         }
         chooseStrand(e, "Delete which strand?", strands) { strand ->
             promptAndRunDelete(project, svc, strand)
+        }
+    }
+}
+
+class OpenStrandInIdeAction : AnAction() {
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        val svc = service(project)
+        val strands = svc.listStrands()
+        if (strands.isEmpty()) {
+            notify(project, "No strands to open.", NotificationType.WARNING)
+            return
+        }
+        chooseStrand(e, "Open which strand in IDE?", strands) { strand ->
+            val path = svc.strandPath(strand)
+            if (!path.exists()) {
+                notify(project, "Strand path missing: $path", NotificationType.ERROR)
+                return@chooseStrand
+            }
+            ProjectUtil.openOrImport(path, OpenProjectTask { forceOpenInNewFrame = true })
         }
     }
 }
