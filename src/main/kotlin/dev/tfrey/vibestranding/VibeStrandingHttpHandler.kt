@@ -145,7 +145,8 @@ class VibeStrandingHttpHandler : HttpRequestHandler() {
                         STRAND_COMMAND,
                     )
                 }
-                OpResult(HttpResponseStatus.OK, "Created strand '$strand' $emoji at ${r.path}")
+                val warn = if (r.linkIssues.isEmpty()) "" else "\nSymlink issues:\n${r.linkIssues.joinToString("\n")}"
+                OpResult(HttpResponseStatus.OK, "Created strand '$strand' $emoji at ${r.path}$warn")
             }
             is GitStrands.CreateResult.Failed ->
                 OpResult(HttpResponseStatus.CONFLICT, r.message)
@@ -159,6 +160,9 @@ class VibeStrandingHttpHandler : HttpRequestHandler() {
         if (strand !in svc.listStrands()) {
             return OpResult(HttpResponseStatus.NOT_FOUND, "No strand named '$strand'.")
         }
+        // Self-heal symlinks before reopening: a previous spawn may have
+        // failed silently, or something inside the strand may have nuked them.
+        val linkIssues = svc.ensureLinks(strand)
         var focused = false
         ApplicationManager.getApplication().invokeAndWait {
             focused = TerminalTabs.focusTerminalTab(project) { strandFromTabName(it) == strand }
@@ -172,7 +176,8 @@ class VibeStrandingHttpHandler : HttpRequestHandler() {
             }
         }
         val verb = if (focused) "Focused" else "Resumed"
-        return OpResult(HttpResponseStatus.OK, "$verb '$strand'.")
+        val warn = if (linkIssues.isEmpty()) "" else "\nSymlink issues:\n${linkIssues.joinToString("\n")}"
+        return OpResult(HttpResponseStatus.OK, "$verb '$strand'.$warn")
     }
 
     private fun doFinish(project: Project, params: Map<String, String>): OpResult {

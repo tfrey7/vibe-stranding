@@ -8,6 +8,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import git4idea.config.GitExecutableManager
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import kotlin.io.path.exists
 import kotlin.io.path.name
@@ -40,7 +41,7 @@ class GitStrands(private val project: Project) {
     }
 
     sealed interface CreateResult {
-        data class Ok(val path: Path) : CreateResult
+        data class Ok(val path: Path, val linkIssues: List<String> = emptyList()) : CreateResult
         data class Failed(val message: String) : CreateResult
     }
 
@@ -129,20 +130,51 @@ class GitStrands(private val project: Project) {
         // then hide those symlinks from `git status`. Without the exclude, every
         // strand starts out "dirty" (the symlinks show as untracked), which would
         // trip the finish-time dirty check and also block `git worktree remove`.
-        PLUGIN_MANAGED_PATHS.forEach { name ->
-            linkIfPresent(main.resolve(name), wt.resolve(name))
-        }
+        val issues = ensureManagedLinks(wt)
         addToInfoExclude(wt, PLUGIN_MANAGED_PATHS)
 
         refresh(wt)
-        return CreateResult.Ok(wt)
+        return CreateResult.Ok(wt, issues)
     }
 
-    private fun linkIfPresent(target: Path, link: Path) {
-        if (target.exists() && !link.exists()) {
-            runCatching { Files.createSymbolicLink(link, target) }
-                .onFailure { LOG.warn("Could not symlink $link -> $target", it) }
+    /**
+     * Idempotent + self-healing: for each managed path, make sure the strand
+     * has a symlink to the corresponding entry in the main checkout. Repairs
+     * dangling links and links pointing at the wrong target. Refuses to
+     * clobber a real file/dir sitting at the link path. Safe to call on every
+     * resume / create.
+     */
+    fun ensureLinks(strand: String): List<String> {
+        val wt = strandPath(strand)
+        if (!wt.exists()) return listOf("Strand path missing: $wt")
+        return ensureManagedLinks(wt)
+    }
+
+    private fun ensureManagedLinks(wt: Path): List<String> {
+        val main = mainCheckout()
+        val issues = mutableListOf<String>()
+        PLUGIN_MANAGED_PATHS.forEach { name ->
+            val target = main.resolve(name)
+            val link = wt.resolve(name)
+            if (!target.exists()) return@forEach // nothing in main to link to — silent
+            try {
+                val linkPresent = Files.exists(link, LinkOption.NOFOLLOW_LINKS)
+                if (linkPresent) {
+                    if (!Files.isSymbolicLink(link)) {
+                        issues.add("$name: a real file/dir is already present in the strand; not replacing")
+                        return@forEach
+                    }
+                    val current = runCatching { Files.readSymbolicLink(link) }.getOrNull()
+                    if (current == target) return@forEach // already correct
+                    Files.delete(link) // wrong/dangling symlink — replace
+                }
+                Files.createSymbolicLink(link, target)
+            } catch (t: Throwable) {
+                LOG.warn("Could not link $link -> $target", t)
+                issues.add("$name: ${t.message ?: t::class.simpleName}")
+            }
         }
+        return issues
     }
 
     private fun addToInfoExclude(wt: Path, names: List<String>) {

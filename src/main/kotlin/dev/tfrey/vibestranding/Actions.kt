@@ -193,6 +193,13 @@ class NewStrandAction : AnAction() {
                         STRAND_COMMAND,
                     )
                     notify(project, "Created strand '$strand'.", NotificationType.INFORMATION)
+                    if (r.linkIssues.isNotEmpty()) {
+                        notify(
+                            project,
+                            "Symlink issues in '$strand':\n${r.linkIssues.joinToString("\n")}",
+                            NotificationType.WARNING,
+                        )
+                    }
                 }
                 is GitStrands.CreateResult.Failed -> onEdt {
                     notify(project, r.message, NotificationType.ERROR)
@@ -220,6 +227,9 @@ class ResumeStrandAction : AnAction() {
         if (TerminalTabs.focusTerminalTab(project) { strandFromTabName(it) == strand }) {
             return
         }
+        // Self-heal symlinks before reopening: a previous spawn may have
+        // failed silently, or something inside the strand may have nuked them.
+        val linkIssues = svc.ensureLinks(strand)
         TerminalTabs.openTerminalTab(
             project,
             svc.strandPath(strand).toString(),
@@ -227,6 +237,13 @@ class ResumeStrandAction : AnAction() {
             RESUME_COMMAND,
         )
         notify(project, "Resumed strand '$strand'.", NotificationType.INFORMATION)
+        if (linkIssues.isNotEmpty()) {
+            notify(
+                project,
+                "Symlink issues in '$strand':\n${linkIssues.joinToString("\n")}",
+                NotificationType.WARNING,
+            )
+        }
     }
 }
 
