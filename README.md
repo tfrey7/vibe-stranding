@@ -1,4 +1,6 @@
-# Vibe Stranding
+<p align="center">
+  <img src="assets/logo.png" alt="Vibe Stranding" width="600">
+</p>
 
 *The first strand-based vibe coding system.*
 
