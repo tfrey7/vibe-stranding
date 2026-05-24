@@ -177,28 +177,31 @@ class NewStrandAction : AnAction() {
                 val s = StrandNamer.naiveSlug(description)
                 s to fallbackEmoji(s)
             }
-            createStrand(project, slug, emoji)
+            createStrand(project, slug, emoji, description)
         }
     }
 
-    private fun createStrand(project: Project, strand: String, emoji: String) {
+    private fun createStrand(project: Project, strand: String, emoji: String, description: String?) {
         val svc = service(project)
         runInBackground(project, "Creating strand '$strand'") {
             when (val r = svc.createStrand(strand)) {
-                is GitStrands.CreateResult.Ok -> onEdt {
-                    TerminalTabs.openTerminalTab(
-                        project,
-                        r.path.toString(),
-                        tabLabel(emoji, strand),
-                        STRAND_COMMAND,
-                    )
-                    notify(project, "Created strand '$strand'.", NotificationType.INFORMATION)
-                    if (r.linkIssues.isNotEmpty()) {
-                        notify(
+                is GitStrands.CreateResult.Ok -> {
+                    svc.metadata.write(strand, StrandMeta(emoji, description))
+                    onEdt {
+                        TerminalTabs.openTerminalTab(
                             project,
-                            "Symlink issues in '$strand':\n${r.linkIssues.joinToString("\n")}",
-                            NotificationType.WARNING,
+                            r.path.toString(),
+                            tabLabel(emoji, strand),
+                            STRAND_COMMAND,
                         )
+                        notify(project, "Created strand '$strand'.", NotificationType.INFORMATION)
+                        if (r.linkIssues.isNotEmpty()) {
+                            notify(
+                                project,
+                                "Symlink issues in '$strand':\n${r.linkIssues.joinToString("\n")}",
+                                NotificationType.WARNING,
+                            )
+                        }
                     }
                 }
                 is GitStrands.CreateResult.Failed -> onEdt {
@@ -230,10 +233,11 @@ class ResumeStrandAction : AnAction() {
         // Self-heal symlinks before reopening: a previous spawn may have
         // failed silently, or something inside the strand may have nuked them.
         val linkIssues = svc.ensureLinks(strand)
+        val emoji = svc.metadata.read(strand)?.emoji ?: fallbackEmoji(strand)
         TerminalTabs.openTerminalTab(
             project,
             svc.strandPath(strand).toString(),
-            tabLabel(fallbackEmoji(strand), strand),
+            tabLabel(emoji, strand),
             RESUME_COMMAND,
         )
         notify(project, "Resumed strand '$strand'.", NotificationType.INFORMATION)

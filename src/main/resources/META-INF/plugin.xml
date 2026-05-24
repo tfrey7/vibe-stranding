@@ -15,7 +15,7 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup id="Vibe Stranding" displayType="BALLOON"/>
-        <httpRequestHandler implementation="dev.tfrey.vibestranding.VibeStrandingHttpHandler"/>
+        <httpRequestHandler implementation="dev.tfrey.vibestranding.HttpHandler"/>
         <!-- GitStrands is a @Service(PROJECT); no registration needed. -->
     </extensions>
 

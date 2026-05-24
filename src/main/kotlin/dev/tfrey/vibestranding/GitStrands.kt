@@ -34,7 +34,18 @@ class GitStrands(private val project: Project) {
         // Paths the plugin symlinks into every new strand from the main checkout.
         // Listed once so the symlink and the info/exclude entries stay in sync.
         private val PLUGIN_MANAGED_PATHS = listOf("node_modules", ".env")
+
+        // Sidecar filename for per-strand metadata. Lives inside the strand's
+        // per-worktree gitdir, resolved via `git rev-parse --git-path`.
+        private const val SIDECAR_FILE = "vibe-stranding.json"
     }
+
+    /**
+     * Per-strand metadata store. Swap the right-hand side to change where
+     * metadata lives (sidecar file today; plugin state, remote service, etc.
+     * in the future) without touching callers.
+     */
+    val metadata: StrandMetadataStore = WorktreeSidecarStore { strand -> sidecarPath(strand) }
 
     data class GitResult(val exitCode: Int, val stdout: String, val stderr: String) {
         val ok: Boolean get() = exitCode == 0
@@ -177,6 +188,21 @@ class GitStrands(private val project: Project) {
         return issues
     }
 
+    /**
+     * Resolve the sidecar metadata file's path inside the strand's per-worktree
+     * gitdir. Returns null if the strand worktree doesn't exist or git refuses
+     * to report a gitdir for it. Used by [WorktreeSidecarStore] via the lambda
+     * passed at construction.
+     */
+    private fun sidecarPath(strand: String): Path? {
+        val wt = strandPath(strand)
+        if (!wt.exists()) return null
+        val r = git(wt, "rev-parse", "--git-path", SIDECAR_FILE)
+        if (!r.ok || r.stdout.isBlank()) return null
+        val raw = Path.of(r.stdout)
+        return if (raw.isAbsolute) raw else wt.resolve(raw)
+    }
+
     private fun addToInfoExclude(wt: Path, names: List<String>) {
         val r = git(wt, "rev-parse", "--git-path", "info/exclude")
         if (!r.ok || r.stdout.isBlank()) return
@@ -237,6 +263,11 @@ class GitStrands(private val project: Project) {
         val main = mainCheckout()
         val wt = strandPath(strand)
         val branch = branchName(strand)
+
+        // Give the metadata store a chance to clean up before the worktree
+        // (and thus the sidecar's gitdir, for the file backend) disappears.
+        // Backends that ride on git's lifecycle can no-op; others need it.
+        metadata.delete(strand)
 
         val removeArgs = buildList {
             add("worktree")

@@ -61,7 +61,7 @@ import org.jetbrains.ide.HttpRequestHandler
  * operations are bounced to the EDT via invokeAndWait. These are lightly
  * used personal-workflow endpoints, not a high-RPS surface.
  */
-class VibeStrandingHttpHandler : HttpRequestHandler() {
+class HttpHandler : HttpRequestHandler() {
 
     override fun isSupported(request: FullHttpRequest): Boolean {
         if (request.method() != HttpMethod.GET && request.method() != HttpMethod.POST) return false
@@ -134,9 +134,11 @@ class VibeStrandingHttpHandler : HttpRequestHandler() {
         }
 
         val emoji = explicitEmoji ?: inferredEmoji
+        val svc = service(project)
 
-        return when (val r = service(project).createStrand(strand)) {
+        return when (val r = svc.createStrand(strand)) {
             is GitStrands.CreateResult.Ok -> {
+                svc.metadata.write(strand, StrandMeta(emoji, description.takeIf { it.isNotEmpty() }))
                 ApplicationManager.getApplication().invokeAndWait {
                     TerminalTabs.openTerminalTab(
                         project,
@@ -163,6 +165,7 @@ class VibeStrandingHttpHandler : HttpRequestHandler() {
         // Self-heal symlinks before reopening: a previous spawn may have
         // failed silently, or something inside the strand may have nuked them.
         val linkIssues = svc.ensureLinks(strand)
+        val emoji = svc.metadata.read(strand)?.emoji ?: fallbackEmoji(strand)
         var focused = false
         ApplicationManager.getApplication().invokeAndWait {
             focused = TerminalTabs.focusTerminalTab(project) { strandFromTabName(it) == strand }
@@ -170,7 +173,7 @@ class VibeStrandingHttpHandler : HttpRequestHandler() {
                 TerminalTabs.openTerminalTab(
                     project,
                     svc.strandPath(strand).toString(),
-                    "${fallbackEmoji(strand)} $strand",
+                    "$emoji $strand",
                     RESUME_COMMAND,
                 )
             }
