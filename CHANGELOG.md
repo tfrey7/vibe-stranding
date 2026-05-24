@@ -10,6 +10,10 @@ Each release should add a new section at the top. Keep entries terse
 prose — IntelliJ's change-notes view renders a subset of HTML, not
 markdown, so bullet syntax won't render; use sentences.
 
+## 0.4.0 — 2026-05-24
+
+New Summarize This Strand action drops a claude -p summary into a side tool window. New Strand opens its terminal tab instantly with a modal progress overlay during the git work, and each tab now gets its own background color from a rotating palette so siblings are easy to tell apart. The strand dropdown inlines active strands as Resume entries and drops the separate Finish / Delete pickers. The MCP server now exposes strand metadata: list_strands returns JSON (name, emoji, description, color) per strand, and a new get_strand tool returns the same shape for one strand.
+
 ## 0.3.1 — 2026-05-24
 
 Populate the IDE's "What's New" panel — the bundled plugin.xml now ships with a change-notes element sourced from CHANGELOG.md, so installed copies show release notes in Settings → Plugins.
