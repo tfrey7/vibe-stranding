@@ -1,8 +1,6 @@
 # Vibe Stranding — repo workflow
 
-Developer-workflow rules for *this repo* (the plugin source). For the runtime
-HTTP API that other Claude sessions use to drive the installed plugin, see
-`claude-workflow.md`.
+Developer-workflow rules for *this repo* (the plugin source).
 
 ## Publishing a new version
 
