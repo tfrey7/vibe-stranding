@@ -29,6 +29,10 @@ dependencies {
 
         // Used by the MCP endpoint to read/write JSON-RPC payloads.
         bundledModule("intellij.libraries.kotlinx.serialization.json")
+
+        // Used by the strand summary tool window to render claude's markdown
+        // output as styled HTML (via JBHtmlPane).
+        bundledModule("intellij.libraries.markdown")
     }
 }
 

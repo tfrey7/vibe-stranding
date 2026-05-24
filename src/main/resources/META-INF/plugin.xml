@@ -16,6 +16,11 @@
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup id="Vibe Stranding" displayType="BALLOON"/>
         <httpRequestHandler implementation="dev.tfrey.vibestranding.HttpHandler"/>
+        <toolWindow id="Vibe Stranding Summary"
+                    anchor="right"
+                    secondary="true"
+                    icon="/icons/vibe-stranding.svg"
+                    factoryClass="dev.tfrey.vibestranding.StrandSummaryToolWindowFactory"/>
         <!-- GitStrands is a @Service(PROJECT); no registration needed. -->
     </extensions>
 
@@ -38,6 +43,10 @@
                     text="Open Strand in IDE..."
                     description="Open a strand's worktree as a project in a new IDE window"/>
             <separator/>
+            <action id="VibeStranding.SummarizeThis"
+                    class="dev.tfrey.vibestranding.SummarizeThisStrandAction"
+                    text="Summarize This Strand"
+                    description="Ask the strand's claude session to summarize the work done so far"/>
             <action id="VibeStranding.FinishThis"
                     class="dev.tfrey.vibestranding.FinishThisStrandAction"
                     text="Finish This Strand"

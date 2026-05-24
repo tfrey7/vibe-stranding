@@ -33,6 +33,14 @@ internal const val STRAND_COMMAND = "claude"
 // then closed without interacting), where `--continue` would otherwise error.
 internal const val RESUME_COMMAND = "claude --continue || claude"
 
+// Prompt sent to a one-shot `claude -p` invocation inside the strand's worktree.
+// The subprocess has no prior conversation context, but it does have the
+// worktree on disk plus shell tools, so we point it at `git log` / `git diff`
+// as the source of truth for what the strand actually changed.
+internal const val SUMMARIZE_PROMPT =
+    "Summarize the work done on this strand so far — what changed, why, and what state it's in. " +
+        "Use git log and git diff against main as your source of truth. Keep it under 200 words."
+
 // Fallback emoji palette used while we're waiting on claude haiku to pick
 // a semantic one (or forever, when claude isn't on PATH). Hash-based so
 // repeated reads on the same strand pick the same color.
@@ -350,6 +358,59 @@ class FinishThisStrandAction : AnAction() {
         val project = e.project ?: return
         val strand = focusedStrand(project) ?: return
         runFinish(project, service(project), strand)
+    }
+}
+
+/**
+ * Runs `claude -p` in the focused strand's worktree, asks for a summary of the
+ * work so far, and renders the result in the Vibe Stranding Summary tool window.
+ * The strand's live claude session is untouched.
+ */
+class SummarizeThisStrandAction : AnAction() {
+    override fun update(e: AnActionEvent) {
+        val project = e.project
+        e.presentation.isEnabled = project != null && focusedStrand(project) != null
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        val strand = focusedStrand(project) ?: return
+        val worktree = service(project).strandPath(strand).toString()
+
+        onEdt { showStrandSummary(project, strand, "Summarizing '$strand'…") }
+        runInBackground(project, "Summarizing '$strand'") {
+            val output = runClaudeSummary(worktree, SUMMARIZE_PROMPT)
+            onEdt { showStrandSummary(project, strand, output) }
+        }
+    }
+}
+
+// Invoke `claude -p` via a login shell so the user's PATH (and wherever they
+// installed claude — npm-global, mise, asdf, etc.) is set up. The prompt is
+// passed as $1 inside double quotes, which prevents any shell-metacharacter
+// interpretation regardless of what's in [prompt]. stdin is redirected from
+// /dev/null so claude doesn't wait 3s for piped input before proceeding.
+private fun runClaudeSummary(worktree: String, prompt: String): String {
+    val pb = ProcessBuilder(
+        "bash",
+        "-lc",
+        "claude -p \"\$1\" < /dev/null",
+        "vibe-stranding-summary",
+        prompt,
+    )
+        .directory(java.io.File(worktree))
+        .redirectErrorStream(true)
+    return try {
+        val proc = pb.start()
+        val output = proc.inputStream.bufferedReader().readText()
+        proc.waitFor()
+        if (proc.exitValue() != 0) {
+            "claude exited with code ${proc.exitValue()}:\n\n$output"
+        } else {
+            output.ifBlank { "(claude returned no output)" }
+        }
+    } catch (t: Throwable) {
+        "Failed to run claude: ${t.message}"
     }
 }
 
