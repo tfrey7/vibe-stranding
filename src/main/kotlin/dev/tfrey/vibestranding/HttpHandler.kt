@@ -22,6 +22,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
@@ -36,9 +37,10 @@ import org.jetbrains.ide.HttpRequestHandler
  * (curl/scripting) and the MCP endpoint (Claude Code) on the IDE's built-in
  * HTTP server, default port 63342.
  *
- *   --- REST (query-param style, plain-text responses) ---
+ *   --- REST (query-param style, plain-text or JSON responses) ---
  *
- *   GET|POST /api/vibe-stranding/list
+ *   GET|POST /api/vibe-stranding/list                         (JSON array)
+ *   GET|POST /api/vibe-stranding/get?name=<kebab>             (JSON object)
  *   POST     /api/vibe-stranding/new?description=<free text>
  *   POST     /api/vibe-stranding/new?name=<kebab>[&emoji=<one-emoji>]
  *   POST     /api/vibe-stranding/finish?name=<kebab>[&delete=true]
@@ -92,16 +94,19 @@ class HttpHandler : HttpRequestHandler() {
             "finish" -> doFinish(project, params)
             "delete" -> doDelete(project, params)
             "list" -> doList(project)
+            "get" -> doGet(project, params)
             else -> OpResult(HttpResponseStatus.NOT_FOUND, "Unknown endpoint: $endpoint")
         }
-        respond(request, context, result.status, result.text + "\n")
+        val contentType = if (result.isJson) "application/json; charset=utf-8" else "text/plain; charset=utf-8"
+        val body = if (result.isJson) result.text else result.text + "\n"
+        respond(request, context, result.status, body, contentType)
         return true
     }
 
     // ---------- Shared operation layer ---------------------------------------
 
     /** Outcome of one plugin operation, suitable for either REST or MCP framing. */
-    private data class OpResult(val status: HttpResponseStatus, val text: String) {
+    private data class OpResult(val status: HttpResponseStatus, val text: String, val isJson: Boolean = false) {
         val isOk: Boolean get() = status.code() in 200..299
     }
 
@@ -251,9 +256,31 @@ class HttpHandler : HttpRequestHandler() {
     }
 
     private fun doList(project: Project): OpResult {
-        val strands = service(project).listStrands()
-        val body = if (strands.isEmpty()) "(no active strands)" else strands.joinToString("\n")
-        return OpResult(HttpResponseStatus.OK, body)
+        val svc = service(project)
+        val array = buildJsonArray {
+            svc.listStrands().forEach { name ->
+                add(strandJson(name, svc.metadata.read(name)))
+            }
+        }
+        return OpResult(HttpResponseStatus.OK, JSON.encodeToString(JsonElement.serializer(), array), isJson = true)
+    }
+
+    private fun doGet(project: Project, params: Map<String, String>): OpResult {
+        val strand = requireStrandName(params)
+            ?: return OpResult(HttpResponseStatus.BAD_REQUEST, "Missing or invalid 'name'.")
+        val svc = service(project)
+        if (strand !in svc.listStrands()) {
+            return OpResult(HttpResponseStatus.NOT_FOUND, "No strand named '$strand'.")
+        }
+        val json = strandJson(strand, svc.metadata.read(strand))
+        return OpResult(HttpResponseStatus.OK, JSON.encodeToString(JsonElement.serializer(), json), isJson = true)
+    }
+
+    private fun strandJson(name: String, meta: StrandMeta?): JsonObject = buildJsonObject {
+        put("name", name)
+        put("emoji", meta?.emoji?.let(::JsonPrimitive) ?: JsonNull)
+        put("description", meta?.description?.let(::JsonPrimitive) ?: JsonNull)
+        put("color", meta?.background?.let(::JsonPrimitive) ?: JsonNull)
     }
 
     // ---------- MCP dispatcher ----------------------------------------------
@@ -333,6 +360,7 @@ class HttpHandler : HttpRequestHandler() {
                 add(TOOL_FINISH_STRAND)
                 add(TOOL_DELETE_STRAND)
                 add(TOOL_LIST_STRANDS)
+                add(TOOL_GET_STRAND)
             }
         }
         "tools/call" -> callTool(params)
@@ -360,6 +388,7 @@ class HttpHandler : HttpRequestHandler() {
             "finish_strand" -> doFinish(project, argMap)
             "delete_strand" -> doDelete(project, argMap)
             "list_strands" -> doList(project)
+            "get_strand" -> doGet(project, argMap)
             else -> return toolError("Unknown tool: $toolName")
         }
         return toolResult(result.text, isError = !result.isOk)
@@ -593,8 +622,11 @@ class HttpHandler : HttpRequestHandler() {
             put("name", "list_strands")
             put(
                 "description",
-                "List the currently active strand slugs. " +
-                    "Use to disambiguate when the user refers to a strand without its exact slug, or to confirm what's in flight.",
+                "List the currently active strands. Returns a JSON array of objects with " +
+                    "`name` (kebab slug), `emoji`, `description` (free-text summary), and `color` " +
+                    "(hex like `#4E78A0`). `emoji` / `description` / `color` may be null for strands " +
+                    "created without metadata. Use to disambiguate when the user refers to a strand " +
+                    "without its exact slug, or to confirm what's in flight.",
             )
             putJsonObject("inputSchema") {
                 put("type", "object")
@@ -604,6 +636,31 @@ class HttpHandler : HttpRequestHandler() {
                         put("description", "Project name or basePath; needed only when multiple IDE windows are open.")
                     }
                 }
+            }
+        }
+
+        private val TOOL_GET_STRAND = buildJsonObject {
+            put("name", "get_strand")
+            put(
+                "description",
+                "Fetch metadata for one strand: returns a JSON object with `name`, `emoji`, " +
+                    "`description`, and `color` (same shape as a single entry from `list_strands`). " +
+                    "Use when the user asks about a specific strand's color, emoji, or summary, " +
+                    "or when you need richer context than the slug alone.",
+            )
+            putJsonObject("inputSchema") {
+                put("type", "object")
+                putJsonObject("properties") {
+                    putJsonObject("name") {
+                        put("type", "string")
+                        put("description", "Kebab slug of the strand to look up.")
+                    }
+                    putJsonObject("project") {
+                        put("type", "string")
+                        put("description", "Project name or basePath; needed only when multiple IDE windows are open.")
+                    }
+                }
+                putJsonArray("required") { add("name") }
             }
         }
     }
