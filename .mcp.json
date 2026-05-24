@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "vibe-stranding": {
+      "type": "http",
+      "url": "http://localhost:65000/api/vibe-stranding/mcp"
+    }
+  }
+}
