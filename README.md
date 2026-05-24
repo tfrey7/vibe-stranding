@@ -4,108 +4,41 @@
 
 *The first strand-based vibe coding system.*
 
-A small WebStorm / IntelliJ plugin for an ephemeral-strand-per-worktree
-workflow: each in-flight strand of work (a feature, a bug fix, or an
-investigation) gets its own git worktree and terminal tab, and the workspace
-is thrown away once the strand lands on `main`.
+## What it does
 
-- **New Strand…** — prompts for a free-text description, asks `claude` to
-  pick a kebab-case slug + emoji, runs
-  `git worktree add -b strand/<name> ../<project>-strands/<name> main`,
-  symlinks `node_modules` and `.env` from the main checkout, and opens a
-  terminal tab named for the strand running `claude` in it.
-- **Finish Strand…** — rebases `strand/<name>` onto the default branch,
-  fast-forwards it, then deletes the worktree (the expected next step in
-  the ephemeral model). On rebase conflict it stops and tells you where to
-  resolve.
-- **Delete Strand…** — `git worktree remove` + `git branch -d` (or `-D`
-  with Force). Standalone path for strands being abandoned without
-  finishing.
+A WebStorm / IntelliJ plugin for running multiple Claude Code agents on the
+same project in parallel.
 
-The "This Strand" variants act on whichever strand owns the focused
-terminal tab.
+Normally you'd give each agent its own branch — but a single checkout can
+only have one branch checked out at a time, so parallel agents end up
+stepping on each other's files. This plugin uses **git worktrees** instead:
+each in-flight strand of work (a feature, a bug fix, an investigation) gets
+its own sibling checkout on its own branch, with a terminal tab running
+`claude` inside it. When the strand lands on `main`, the worktree is thrown
+away.
 
-All five live under **Tools ▸ Vibe Stranding** and on the Terminal tool
-window's toolbar dropdown.
+Two actions, under **Tools ▸ Vibe Stranding** and on the Terminal tool
+window's toolbar:
 
-## Build / run
+- **New Strand…** — spins up a fresh worktree for an agent to work in.
+- **Finish Strand…** — lands that worktree's work back on `main`.
 
-```bash
-./gradlew runIde      # launches a sandbox IDE with the plugin loaded
-./gradlew buildPlugin # produces build/distributions/vibe-stranding-*.zip
-```
+## Install
 
-## Local install cheat sheet
+Grab the latest pre-built zip from the
+[releases page](https://github.com/tfrey7/vibe-stranding/releases/latest) —
+[![Latest release](https://img.shields.io/github/v/release/tfrey7/vibe-stranding?label=latest&color=blue)](https://github.com/tfrey7/vibe-stranding/releases/latest).
 
-Use this flow to load the plugin into your real WebStorm (no marketplace
-publish required).
+In WebStorm: **Settings ▸ Plugins ▸ ⚙ ▸ Install Plugin from Disk…** and
+pick the downloaded `vibe-stranding-<version>.zip`. Restart when prompted.
+
+## Build from source
+
+Requires JDK 17+ on PATH. Gradle auto-downloads JDK 21 for the build itself.
 
 ```bash
-# 1. Build a fresh zip
 ./gradlew buildPlugin
-
-# 2. Locate it
-open build/distributions/        # zip is vibe-stranding-<version>.zip
 ```
 
-If you see an error like `The operation couldn’t be completed. Unable to locate a Java Runtime.`, you can download the 
-.zip directly from the [releases page](https://github.com/tfrey7/vibe-stranding/releases) instead.
-
-In WebStorm:
-
-1. **Settings ▸ Plugins**
-2. Gear icon ▸ **Install Plugin from Disk…**
-3. Pick `build/distributions/vibe-stranding-<version>.zip`
-4. Restart when prompted
-
-**Upgrading** — same flow. Rebuild, install from disk over the existing
-install, restart. WebStorm replaces the prior version in place.
-
-**Uninstalling** — Settings ▸ Plugins ▸ Installed ▸ Vibe Stranding ▸
-gear icon ▸ Uninstall.
-
-**Gotchas**
-
-- `sinceBuild = "261"` in `build.gradle.kts` means the zip only loads on
-  WebStorm 2026.1+ (build 261.x). Older IDEs reject it.
-- `build/distributions/` may contain a stale `feature-worktrees-*.zip`
-  from before the rename — grab `vibe-stranding-*.zip`.
-- Bump `version` in `build.gradle.kts` before rebuilding if you want to
-  tell successive local installs apart in the Plugins list.
-
-## HTTP API
-
-The plugin also serves an HTTP API on the IDE's built-in port (default
-63342) so a Claude Code session can spawn / finish / delete strands without
-clicking through menus:
-
-```
-GET|POST /api/vibe-stranding/list
-POST     /api/vibe-stranding/new?description=<free text>
-POST     /api/vibe-stranding/new?name=<kebab>[&emoji=<one-emoji>]
-POST     /api/vibe-stranding/finish?name=<kebab>[&delete=true]
-POST     /api/vibe-stranding/delete?name=<kebab>[&force=true]
-```
-
-All endpoints take an optional `?project=<name|basePath>` to pick which IDE
-window to act on when more than one is open.
-
-## Things you may need to adjust
-
-- **Terminal engine** — `TerminalTabs.openTerminalTab` uses the classic
-  terminal API. If your WebStorm runs the reworked terminal engine and tabs
-  don't appear, swap that one function for the `TerminalToolWindowTabsManager`
-  path documented in the file.
-- **Platform version** — `build.gradle.kts` targets IDEA Community 2026.1.2
-  with `sinceBuild = "261"`. Bump both to match your WebStorm build, or
-  switch `intellijIdeaCommunity("2026.1.2")` to `webstorm("…")`.
-- **Git executable lookup** — `GitStrands.gitPath()` calls
-  `GitExecutableManager.getPathToGit(project)`; confirm the signature on your
-  platform version (it falls back to `git` on PATH regardless).
-
-## Not built yet
-
-- Auto-launching the merge tool on rebase conflict (extension point marked in
-  `Actions.kt`).
-- A tool window listing live strands with status (ahead-of-main count,
-  dirty/clean, last activity) so you can see at a glance what's in flight.
+Produces `build/distributions/vibe-stranding-<version>.zip`, which installs
+the same way as the pre-built release above.
