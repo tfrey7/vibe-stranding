@@ -11,30 +11,30 @@ private val LOG = logger<StrandNamerService>()
 private class StrandNamerService
 
 /**
- * Asks the `claude` CLI to turn a free-text strand description into a
- * `{slug, emoji}` pair. Best-effort: any failure (claude not on PATH, network
- * down, unparseable output) returns null and the caller falls back to a
- * naive slug + hash-based emoji.
+ * Slug + emoji helpers for naming a strand.
+ *
+ *  - [naiveSlug] is fully local and authoritative — the strand id (= dir
+ *    + branch name) is always the naive slug of the user's description, so
+ *    the tab name matches the on-disk identity.
+ *  - [suggestEmoji] is best-effort: shells out to `claude --model haiku`
+ *    to pick a semantically meaningful single emoji. Any failure (claude
+ *    not on PATH, network down, unparseable output) returns null and the
+ *    caller falls back to [Actions.fallbackEmoji].
  */
 object StrandNamer {
-    data class Suggestion(val slug: String, val emoji: String)
 
     private const val TIMEOUT_MS = 30_000
 
-    private val SLUG_RE = """"slug"\s*:\s*"([^"]+)"""".toRegex()
-    private val EMOJI_RE = """"emoji"\s*:\s*"([^"]+)"""".toRegex()
+    private const val PROMPT_TEMPLATE = """Pick one Unicode emoji that represents this software work.
+Reply with the emoji only — no quotes, no code fences, no prose, nothing else.
 
-    private const val PROMPT_TEMPLATE = """You are naming a strand of software work for a kebab-case git branch.
-Return strict JSON on a single line, no prose, no code fences:
-{"slug": "kebab-case-2-to-4-words", "emoji": "one Unicode emoji related to the work"}
+Work: %s"""
 
-Description: %s"""
-
-    fun suggest(description: String): Suggestion? {
+    fun suggestEmoji(description: String): String? {
         val cmd = GeneralCommandLine("claude")
-            // Haiku is more than enough for "pick a 2-4 word slug and an emoji"
-            // and keeps the dialog latency tight. Using the alias rather than a
-            // pinned model ID so it tracks whatever the current Haiku is.
+            // Haiku is plenty for picking an emoji, and keeps the wait short.
+            // The alias (not a pinned model id) tracks whatever the current
+            // Haiku is.
             .withParameters("--model", "haiku", "-p", PROMPT_TEMPLATE.format(description))
             .withCharset(Charsets.UTF_8)
             // Use the shell's PATH/env so we behave like the terminal — fixes the
@@ -42,19 +42,26 @@ Description: %s"""
             .withParentEnvironmentType(GeneralCommandLine.ParentEnvironmentType.CONSOLE)
 
         return try {
+            val started = System.currentTimeMillis()
             val out = CapturingProcessHandler(cmd).runProcess(TIMEOUT_MS)
+            val elapsed = System.currentTimeMillis() - started
+            LOG.info("claude haiku emoji subprocess: ${elapsed}ms (exit=${out.exitCode})")
             if (out.exitCode != 0) {
                 LOG.warn("claude -p exit ${out.exitCode}: ${out.stderr}")
                 return null
             }
-            val text = out.stdout
-            val slug = SLUG_RE.find(text)?.groupValues?.get(1)
-            val emoji = EMOJI_RE.find(text)?.groupValues?.get(1)
-            if (slug.isNullOrBlank() || emoji.isNullOrBlank()) {
-                LOG.warn("claude -p returned no usable suggestion: $text")
+            // Take the first non-empty line and strip common decorations
+            // (quotes, backticks, surrounding whitespace). Haiku usually
+            // obeys the "emoji only" instruction, but defensive-trim anyway.
+            val raw = out.stdout.lineSequence()
+                .map { it.trim() }
+                .firstOrNull { it.isNotEmpty() }
+                ?.trim('"', '\'', '`', ' ')
+            if (raw.isNullOrBlank()) {
+                LOG.warn("claude -p returned no usable emoji: ${out.stdout}")
                 null
             } else {
-                Suggestion(slug.trim(), emoji.trim())
+                raw
             }
         } catch (t: Throwable) {
             LOG.warn("claude -p failed to launch", t)
@@ -63,9 +70,10 @@ Description: %s"""
     }
 
     /**
-     * Best-effort slug from a free-text description, used when claude is
-     * unavailable. Lowercases, collapses non-alphanumerics to hyphens, keeps
-     * the first few words.
+     * Slug derived locally from the user's description. Lowercases, collapses
+     * non-alphanumerics to hyphens, keeps the first few words. This is the
+     * strand's permanent identifier — directory name and branch name —
+     * because we want the tab label and the on-disk identity to match.
      */
     fun naiveSlug(description: String): String {
         val cleaned = description.lowercase()

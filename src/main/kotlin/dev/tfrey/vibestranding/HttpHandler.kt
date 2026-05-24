@@ -121,10 +121,11 @@ class HttpHandler : HttpRequestHandler() {
                 explicitName to fallbackEmoji(explicitName)
             }
             description.isNotEmpty() -> {
-                val suggestion = StrandNamer.suggest(description)
-                val slug = suggestion?.slug?.takeIf { STRAND_NAME.matches(it) }
-                    ?: StrandNamer.naiveSlug(description)
-                val emoji = suggestion?.emoji ?: fallbackEmoji(slug)
+                // Naive slug is authoritative for the strand id (= dir +
+                // branch name), so the tab label always matches on-disk
+                // identity. LLM is consulted for an emoji only.
+                val slug = StrandNamer.naiveSlug(description)
+                val emoji = StrandNamer.suggestEmoji(description) ?: fallbackEmoji(slug)
                 slug to emoji
             }
             else -> return OpResult(
@@ -135,18 +136,24 @@ class HttpHandler : HttpRequestHandler() {
 
         val emoji = explicitEmoji ?: inferredEmoji
         val svc = service(project)
+        val background = pickStrandBackground(
+            svc.listStrands().mapNotNull { svc.metadata.read(it)?.background },
+        )
 
         return when (val r = svc.createStrand(strand)) {
             is GitStrands.CreateResult.Ok -> {
-                svc.metadata.write(strand, StrandMeta(emoji, description.takeIf { it.isNotEmpty() }))
-                ApplicationManager.getApplication().invokeAndWait {
-                    TerminalTabs.openTerminalTab(
-                        project,
-                        r.path.toString(),
-                        "$emoji $strand",
-                        STRAND_COMMAND,
-                    )
-                }
+                svc.metadata.write(
+                    strand,
+                    StrandMeta(emoji, description.takeIf { it.isNotEmpty() }, background),
+                )
+                TerminalTabs.openTerminalTab(
+                    project,
+                    r.path.toString(),
+                    tabLabel(emoji, strand),
+                    STRAND_COMMAND,
+                    strand,
+                    background,
+                )
                 val warn = if (r.linkIssues.isEmpty()) "" else "\nSymlink issues:\n${r.linkIssues.joinToString("\n")}"
                 OpResult(HttpResponseStatus.OK, "Created strand '$strand' $emoji at ${r.path}$warn")
             }
@@ -165,16 +172,19 @@ class HttpHandler : HttpRequestHandler() {
         // Self-heal symlinks before reopening: a previous spawn may have
         // failed silently, or something inside the strand may have nuked them.
         val linkIssues = svc.ensureLinks(strand)
-        val emoji = svc.metadata.read(strand)?.emoji ?: fallbackEmoji(strand)
+        val meta = svc.metadata.read(strand)
+        val emoji = meta?.emoji ?: fallbackEmoji(strand)
         var focused = false
         ApplicationManager.getApplication().invokeAndWait {
-            focused = TerminalTabs.focusTerminalTab(project) { strandFromTabName(it) == strand }
+            focused = TerminalTabs.focusTabForStrand(project, strand)
             if (!focused) {
                 TerminalTabs.openTerminalTab(
                     project,
                     svc.strandPath(strand).toString(),
-                    "$emoji $strand",
+                    tabLabel(emoji, strand),
                     RESUME_COMMAND,
+                    strand,
+                    meta?.background,
                 )
             }
         }
@@ -197,7 +207,7 @@ class HttpHandler : HttpRequestHandler() {
                     val td = svc.deleteStrand(strand, force = false)
                     if (td.ok) {
                         ApplicationManager.getApplication().invokeAndWait {
-                            TerminalTabs.closeTerminalTab(project) { strandFromTabName(it) == strand }
+                            TerminalTabs.closeTabForStrand(project, strand)
                         }
                         OpResult(
                             HttpResponseStatus.OK,
@@ -235,7 +245,7 @@ class HttpHandler : HttpRequestHandler() {
         val r = service(project).deleteStrand(strand, force)
         if (!r.ok) return OpResult(HttpResponseStatus.INTERNAL_SERVER_ERROR, r.stderr)
         ApplicationManager.getApplication().invokeAndWait {
-            TerminalTabs.closeTerminalTab(project) { strandFromTabName(it) == strand }
+            TerminalTabs.closeTabForStrand(project, strand)
         }
         return OpResult(HttpResponseStatus.OK, "Deleted '$strand'.")
     }

@@ -10,15 +10,17 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.popup.JBPopupFactory
-import com.intellij.openapi.wm.ToolWindowManager
 import kotlin.io.path.exists
 import kotlin.math.abs
+
+private val LOG = logger<NewStrandAction>()
 
 internal val STRAND_NAME = Regex("^[a-z0-9][a-z0-9-]*$")
 
@@ -31,9 +33,9 @@ internal const val STRAND_COMMAND = "claude"
 // then closed without interacting), where `--continue` would otherwise error.
 internal const val RESUME_COMMAND = "claude --continue || claude"
 
-// Fallback emoji palette used only when claude isn't available to pick a
-// semantic one. Hash-based so retries on the same description get the same
-// color within a session.
+// Fallback emoji palette used while we're waiting on claude haiku to pick
+// a semantic one (or forever, when claude isn't on PATH). Hash-based so
+// repeated reads on the same strand pick the same color.
 private val MARKERS = listOf(
     "🔵",
     "🟢",
@@ -47,27 +49,36 @@ private val MARKERS = listOf(
 
 internal fun fallbackEmoji(strand: String): String = MARKERS[abs(strand.hashCode()) % MARKERS.size]
 
-// Tab display format: "<emoji> <kebab-slug>". The emoji is whatever the user
-// (or claude) chose at create time; we never need to reconstruct it later
-// because lookups (delete, focused-strand) parse the slug out of the
-// existing tab name rather than recomputing the full label.
-private fun tabLabel(emoji: String, strand: String): String = "$emoji $strand"
+// Fixed palette of terminal background tints. Targeted around L≈20% so they
+// sit just above the default Darcula terminal background (~#2B2B2B) — dark
+// enough that Claude's orange/yellow UI accents still read clearly, but
+// tinted enough to tell "the purple one" from "the green one" at a glance.
+// We rotate (least-used-first) at strand-create time so siblings pick
+// different colors; duplicates are allowed once we wrap around.
+internal val STRAND_BACKGROUNDS = listOf(
+    "#1F2A3D", // deep navy
+    "#1F2F25", // deep forest
+    "#33291A", // deep amber
+    "#33201F", // deep rust
+    "#291F33", // deep plum
+    "#2D241A", // deep umber
+    "#1A2E2C", // deep teal
+    "#2D1F2A", // deep mauve
+)
 
-// Pull the strand slug back out of a terminal tab's display name. Used by
-// the "this strand" actions to identify the focused strand, and by delete
-// to find the matching tab to close.
-internal fun strandFromTabName(name: String): String? {
-    val parts = name.split(' ', limit = 2)
-    if (parts.size != 2) return null
-    val candidate = parts[1].trim()
-    return if (STRAND_NAME.matches(candidate)) candidate else null
+/**
+ * Pick the next strand background by counting existing usages and returning
+ * the first palette entry with the lowest count. Ties go to palette order,
+ * so siblings created in sequence cycle through colors deterministically.
+ */
+internal fun pickStrandBackground(existing: List<String>): String {
+    val counts = STRAND_BACKGROUNDS.associateWith { color -> existing.count { it == color } }
+    val min = counts.values.min()
+    return STRAND_BACKGROUNDS.first { counts[it] == min }
 }
 
-private fun focusedStrand(project: Project): String? {
-    val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Terminal") ?: return null
-    val content = toolWindow.contentManager.selectedContent ?: return null
-    return strandFromTabName(content.displayName)
-}
+/** Tab label format: `"<emoji> <strand>"` — strand id is always the tab name. */
+internal fun tabLabel(emoji: String, strand: String): String = "$emoji $strand"
 
 private fun notify(project: Project, content: String, type: NotificationType) {
     NotificationGroupManager.getInstance()
@@ -99,10 +110,13 @@ private fun chooseStrand(e: AnActionEvent, title: String, strands: List<String>,
 
 private fun service(project: Project): GitStrands = project.getService(GitStrands::class.java)
 
+private fun focusedStrand(project: Project): String? =
+    TerminalTabs.focusedStrand(project, service(project).listStrands())
+
 private fun afterDelete(project: Project, strand: String, result: GitStrands.GitResult) {
     onEdt {
         if (result.ok) {
-            TerminalTabs.closeTerminalTab(project) { strandFromTabName(it) == strand }
+            TerminalTabs.closeTabForStrand(project, strand)
             notify(project, "Deleted '$strand'.", NotificationType.INFORMATION)
         } else {
             notify(project, "Delete failed:\n${result.stderr}", NotificationType.ERROR)
@@ -172,54 +186,75 @@ class NewStrandAction : AnAction() {
             null,
         )?.trim()?.takeIf { it.isNotEmpty() } ?: return
 
-        // Task.Modal (not Backgroundable) so the user keeps a visible signal
-        // that their action is still in flight: naming via claude shell-out +
-        // worktree creation can take a few seconds, and a vanished input
-        // dialog with a tiny status-bar progress is easy to miss.
-        ProgressManager.getInstance().run(object : Task.Modal(project, "New Strand", false) {
-            override fun run(indicator: ProgressIndicator) {
-                indicator.text = "Naming strand…"
-                val suggestion = StrandNamer.suggest(description)
-                val (slug, emoji) = if (suggestion != null) {
-                    suggestion.slug to suggestion.emoji
-                } else {
-                    val s = StrandNamer.naiveSlug(description)
-                    s to fallbackEmoji(s)
-                }
+        // Pick a slug + emoji synchronously from the description so the tab
+        // can open right away — claude haiku naming takes ~8-16s and would
+        // block the modal that long if we waited. The LLM-picked name and
+        // emoji slot in asynchronously after the tab is up (see
+        // [upgradeNameAsync]). The strand id is locked in at this point
+        // forever because git can't safely rename a worktree's dir + branch
+        // once a `claude` session is running in it.
+        val strand = StrandNamer.naiveSlug(description)
+        val emoji = fallbackEmoji(strand)
 
-                indicator.text = "Creating worktree for '$slug'…"
-                val svc = service(project)
-                when (val r = svc.createStrand(slug)) {
-                    is GitStrands.CreateResult.Ok -> {
-                        svc.metadata.write(slug, StrandMeta(emoji, description))
-                        indicator.text = "Opening terminal tab…"
-                        // invokeAndWait so the modal stays up until the tab is
-                        // visible — invokeLater would let it dismiss while the
-                        // EDT work was still queued.
-                        ApplicationManager.getApplication().invokeAndWait {
-                            TerminalTabs.openTerminalTab(
+        runInBackground(project, "Creating strand '$strand'…") {
+            val svc = service(project)
+            val background = pickStrandBackground(
+                svc.listStrands().mapNotNull { svc.metadata.read(it)?.background },
+            )
+            when (val result = svc.createStrand(strand)) {
+                is GitStrands.CreateResult.Ok -> {
+                    svc.metadata.write(strand, StrandMeta(emoji, description, background))
+                    TerminalTabs.openTerminalTab(
+                        project,
+                        result.path.toString(),
+                        tabLabel(emoji, strand),
+                        STRAND_COMMAND,
+                        strand,
+                        background,
+                    )
+                    onEdt {
+                        notify(project, "Created strand '$strand'.", NotificationType.INFORMATION)
+                        if (result.linkIssues.isNotEmpty()) {
+                            notify(
                                 project,
-                                r.path.toString(),
-                                tabLabel(emoji, slug),
-                                STRAND_COMMAND,
+                                "Symlink issues in '$strand':\n${result.linkIssues.joinToString("\n")}",
+                                NotificationType.WARNING,
                             )
-                            notify(project, "Created strand '$slug'.", NotificationType.INFORMATION)
-                            if (r.linkIssues.isNotEmpty()) {
-                                notify(
-                                    project,
-                                    "Symlink issues in '$slug':\n${r.linkIssues.joinToString("\n")}",
-                                    NotificationType.WARNING,
-                                )
-                            }
                         }
                     }
-                    is GitStrands.CreateResult.Failed -> ApplicationManager.getApplication().invokeAndWait {
-                        notify(project, r.message, NotificationType.ERROR)
-                    }
+                    upgradeEmojiAsync(project, svc, strand, description)
+                }
+                is GitStrands.CreateResult.Failed -> onEdt {
+                    notify(project, result.message, NotificationType.ERROR)
                 }
             }
-        })
+        }
     }
+}
+
+/**
+ * Fires [StrandNamer.suggestEmoji] in the background and swaps the live
+ * strand's tab emoji + sidecar emoji from the fallback color marker to the
+ * LLM's pick. Best-effort: claude unavailable, parse failure, or timeout
+ * all just leave the fallback in place. The slug never changes — only the
+ * emoji.
+ */
+private fun upgradeEmojiAsync(project: Project, svc: GitStrands, strand: String, description: String) {
+    ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Picking emoji for '$strand'…", false) {
+        override fun run(indicator: ProgressIndicator) {
+            val emoji = StrandNamer.suggestEmoji(description)
+            if (emoji == null) {
+                LOG.info("Async emoji for '$strand' returned nothing; keeping fallback marker.")
+                return
+            }
+            // Preserve the background that was just assigned at create time —
+            // overwriting the whole sidecar with a fresh StrandMeta would
+            // otherwise drop it.
+            val existing = svc.metadata.read(strand)
+            svc.metadata.write(strand, StrandMeta(emoji, description, existing?.background))
+            onEdt { TerminalTabs.relabelTab(project, strand, tabLabel(emoji, strand)) }
+        }
+    })
 }
 
 /**
@@ -260,18 +295,19 @@ private class ResumeOneStrandAction(private val strand: String, emoji: String) :
 }
 
 private fun resumeStrand(project: Project, svc: GitStrands, strand: String) {
-    if (TerminalTabs.focusTerminalTab(project) { strandFromTabName(it) == strand }) {
-        return
-    }
+    if (TerminalTabs.focusTabForStrand(project, strand)) return
     // Self-heal symlinks before reopening: a previous spawn may have
     // failed silently, or something inside the strand may have nuked them.
     val linkIssues = svc.ensureLinks(strand)
-    val emoji = svc.metadata.read(strand)?.emoji ?: fallbackEmoji(strand)
+    val meta = svc.metadata.read(strand)
+    val emoji = meta?.emoji ?: fallbackEmoji(strand)
     TerminalTabs.openTerminalTab(
         project,
         svc.strandPath(strand).toString(),
         tabLabel(emoji, strand),
         RESUME_COMMAND,
+        strand,
+        meta?.background,
     )
     notify(project, "Resumed strand '$strand'.", NotificationType.INFORMATION)
     if (linkIssues.isNotEmpty()) {

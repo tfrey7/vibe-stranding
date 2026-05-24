@@ -134,17 +134,38 @@ class GitStrands(private val project: Project) {
 
         Files.createDirectories(strandsRoot())
 
-        val add = git(main, "worktree", "add", "-b", branch, wt.toString(), defaultBranch())
-        if (!add.ok) return CreateResult.Failed("git worktree add failed:\n${add.stderr}")
+        // Per-sub-step timing surfaces in idea.log so we can see whether the
+        // create-strand wall-clock cost is the default-branch lookup, the
+        // `worktree add` itself, or the symlink/exclude setup.
+        val branchStart = System.currentTimeMillis()
+        val baseBranch = defaultBranch()
+        val branchMs = System.currentTimeMillis() - branchStart
+
+        val addStart = System.currentTimeMillis()
+        val add = git(main, "worktree", "add", "-b", branch, wt.toString(), baseBranch)
+        val addMs = System.currentTimeMillis() - addStart
+        if (!add.ok) {
+            LOG.info("createStrand '$strand': defaultBranch=${branchMs}ms, worktreeAdd=${addMs}ms (failed)")
+            return CreateResult.Failed("git worktree add failed:\n${add.stderr}")
+        }
 
         // Symlink so npm and env-dependent tooling work in the strand immediately,
         // then hide those symlinks from `git status`. Without the exclude, every
         // strand starts out "dirty" (the symlinks show as untracked), which would
         // trip the finish-time dirty check and also block `git worktree remove`.
+        val linksStart = System.currentTimeMillis()
         val issues = ensureManagedLinks(wt)
         addToInfoExclude(wt, PLUGIN_MANAGED_PATHS)
+        val linksMs = System.currentTimeMillis() - linksStart
 
+        val refreshStart = System.currentTimeMillis()
         refresh(wt)
+        val refreshMs = System.currentTimeMillis() - refreshStart
+
+        LOG.info(
+            "createStrand '$strand': defaultBranch=${branchMs}ms, worktreeAdd=${addMs}ms, " +
+                "linksAndExclude=${linksMs}ms, refresh=${refreshMs}ms",
+        )
         return CreateResult.Ok(wt, issues)
     }
 

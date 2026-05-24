@@ -12,12 +12,17 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /**
- * Per-strand state that needs to outlive the live terminal tab — currently
- * the emoji picked at create time (so resume can rebuild the original tab
- * label) and the free-text description the user typed, kept around for
- * future use (re-priming the strand session, surfacing in lists, etc.).
+ * Per-strand state that needs to outlive the live terminal tab:
+ *  - [emoji] shown on the tab label and in menus (picked async by claude
+ *    haiku, so it can be upgraded from the fallback color marker after the
+ *    tab opens).
+ *  - [description] is the free-text the user typed at create time.
+ *  - [background] is a hex color (e.g. `"#4E78A0"`) applied to the terminal
+ *    tab header via `Content.setTabColor`. Picked at create time by
+ *    rotating through a fixed palette so siblings visually differ; persisted
+ *    so resuming restores the same color.
  */
-data class StrandMeta(val emoji: String, val description: String? = null)
+data class StrandMeta(val emoji: String, val description: String? = null, val background: String? = null)
 
 /**
  * Backend-agnostic storage for [StrandMeta]. All plugin code reads/writes
@@ -56,7 +61,8 @@ class WorktreeSidecarStore(private val sidecarPath: (strand: String) -> Path?) :
             val obj = JSON.parseToJsonElement(Files.readString(path)).jsonObject
             val emoji = obj["emoji"]?.jsonPrimitive?.contentOrNull ?: return null
             val description = obj["description"]?.jsonPrimitive?.contentOrNull
-            StrandMeta(emoji, description)
+            val background = obj["background"]?.jsonPrimitive?.contentOrNull
+            StrandMeta(emoji, description, background)
         } catch (t: Throwable) {
             LOG.warn("Could not parse strand metadata at $path", t)
             null
@@ -70,6 +76,7 @@ class WorktreeSidecarStore(private val sidecarPath: (strand: String) -> Path?) :
             buildJsonObject {
                 put("emoji", meta.emoji)
                 if (meta.description != null) put("description", meta.description)
+                if (meta.background != null) put("background", meta.background)
             },
         )
         try {
