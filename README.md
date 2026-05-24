@@ -48,6 +48,9 @@ publish required).
 open build/distributions/        # zip is vibe-stranding-<version>.zip
 ```
 
+If you see an error like `The operation couldn’t be completed. Unable to locate a Java Runtime.`, you can download the 
+.zip directly from the [releases page](https://github.com/tfrey7/vibe-stranding/releases) instead.
+
 In WebStorm:
 
 1. **Settings ▸ Plugins**
