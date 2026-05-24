@@ -32,12 +32,29 @@ away.
 
 ## Install
 
-Grab the latest pre-built zip from the
-[releases page](https://github.com/tfrey7/vibe-stranding/releases/latest) —
+The plugin isn't on the JetBrains Marketplace. Instead, point your IDE at the
+custom update repository below — that gives you the same one-click install
+and silent auto-update flow as the marketplace, without the review queue.
+
+In WebStorm/IntelliJ: **Settings ▸ Plugins ▸ ⚙ ▸ Manage Plugin Repositories…**,
+click **+**, paste:
+
+```
+https://tfrey7.github.io/vibe-stranding/updatePlugins.xml
+```
+
+Then switch to the **Marketplace** tab inside Plugins, search "Vibe Stranding",
+and click **Install**. Restart when prompted. From then on, the IDE polls that
+URL on its normal update cadence and surfaces new versions in the standard
+"Updates available" notification —
 [![Latest release](https://img.shields.io/github/v/release/tfrey7/vibe-stranding?label=latest&color=blue)](https://github.com/tfrey7/vibe-stranding/releases/latest).
 
-In WebStorm: **Settings ▸ Plugins ▸ ⚙ ▸ Install Plugin from Disk…** and
-pick the downloaded `vibe-stranding-<version>.zip`. Restart when prompted.
+### Install from disk (alternative)
+
+Prefer not to add the repo? Grab the zip from the
+[releases page](https://github.com/tfrey7/vibe-stranding/releases/latest) and
+install via **Settings ▸ Plugins ▸ ⚙ ▸ Install Plugin from Disk…**. You'll
+need to repeat that for each update.
 
 ## Drive it from Claude Code
 
@@ -67,4 +84,4 @@ Requires JDK 17+ on PATH. Gradle auto-downloads JDK 21 for the build itself.
 ```
 
 Produces `build/distributions/vibe-stranding-<version>.zip`, which installs
-the same way as the pre-built release above.
+via **Install Plugin from Disk…** like any other plugin zip.

@@ -1,0 +1,95 @@
+name: Publish updatePlugins.xml
+
+# Regenerates the custom-repository manifest at
+# https://tfrey7.github.io/vibe-stranding/updatePlugins.xml and redeploys it to
+# GitHub Pages. The manifest always reflects the repo's latest GitHub release,
+# so installed plugins poll this URL and pick up new versions on the IDE's
+# usual update cadence — no marketplace review needed.
+#
+# One-time repo setup (done in the GitHub UI, not here):
+#   Settings ▸ Pages ▸ Build and deployment ▸ Source = "GitHub Actions".
+# After that, every release auto-publishes; trigger this workflow manually
+# (Actions tab ▸ Run workflow) once to publish the current release for the
+# first time.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve latest release
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=$(gh release view --json tagName -q .tagName)
+          VERSION="${TAG#v}"
+          SINCE_BUILD=$(grep -oE 'sinceBuild = "[^"]+"' build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "tag=$TAG"               >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION"       >> "$GITHUB_OUTPUT"
+          echo "since_build=$SINCE_BUILD" >> "$GITHUB_OUTPUT"
+          {
+            echo "notes<<EOF_NOTES"
+            gh release view --json body -q .body
+            echo "EOF_NOTES"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate updatePlugins.xml
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.rel.outputs.tag }}
+          VERSION: ${{ steps.rel.outputs.version }}
+          SINCE_BUILD: ${{ steps.rel.outputs.since_build }}
+          NOTES: ${{ steps.rel.outputs.notes }}
+        run: |
+          set -euo pipefail
+          mkdir -p site
+          # Defang any ]]> in the release notes so it can't escape the CDATA.
+          ESCAPED_NOTES="${NOTES//]]>/]]]]><![CDATA[>}"
+          cat > site/updatePlugins.xml <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <plugins>
+            <plugin
+              id="dev.tfrey.vibe-stranding"
+              url="https://github.com/${REPO}/releases/download/${TAG}/vibe-stranding-${VERSION}.zip"
+              version="${VERSION}">
+              <idea-version since-build="${SINCE_BUILD}"/>
+              <name>Vibe Stranding</name>
+              <vendor>tfrey7</vendor>
+              <description><![CDATA[The first strand-based vibe coding system. Declare a strand of work, develop it in its own git worktree and terminal tab, finish it onto main when done, and delete the workspace. One tab per strand.]]></description>
+              <change-notes><![CDATA[${ESCAPED_NOTES}]]></change-notes>
+            </plugin>
+          </plugins>
+          EOF
+          echo "--- Generated updatePlugins.xml ---"
+          cat site/updatePlugins.xml
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
