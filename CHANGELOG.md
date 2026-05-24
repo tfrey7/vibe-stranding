@@ -10,6 +10,10 @@ Each release should add a new section at the top. Keep entries terse
 prose — IntelliJ's change-notes view renders a subset of HTML, not
 markdown, so bullet syntax won't render; use sentences.
 
+## 0.5.0 — 2026-05-24
+
+Fix Summarize This Strand on macOS for users whose claude install lives on a PATH set up in .zshrc / .zprofile (npm-global, mise, asdf). The action previously shelled out via bash -lc, which only sources bash login config, so zsh users hit "claude: command not found". It now uses the same shell-environment path as the strand-emoji subprocess. Also adds a 5-minute timeout so a hung summary surfaces instead of waiting forever.
+
 ## 0.4.0 — 2026-05-24
 
 New Summarize This Strand action drops a claude -p summary into a side tool window. New Strand opens its terminal tab instantly with a modal progress overlay during the git work, and each tab now gets its own background color from a rotating palette so siblings are easy to tell apart. The strand dropdown inlines active strands as Resume entries and drops the separate Finish / Delete pickers. The MCP server now exposes strand metadata: list_strands returns JSON (name, emoji, description, color) per strand, and a new get_strand tool returns the same shape for one strand.
