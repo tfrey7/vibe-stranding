@@ -190,17 +190,19 @@ class GitStrands(private val project: Project) {
 
     /**
      * Resolve the sidecar metadata file's path inside the strand's per-worktree
-     * gitdir. Returns null if the strand worktree doesn't exist or git refuses
-     * to report a gitdir for it. Used by [WorktreeSidecarStore] via the lambda
-     * passed at construction.
+     * gitdir. Returns null if the strand worktree doesn't exist. Used by
+     * [WorktreeSidecarStore] via the lambda passed at construction.
+     *
+     * Computed directly from the known worktree layout rather than via
+     * `git rev-parse --git-path` because this path is read from
+     * [ResumeStrandsGroup.getChildren] during action-update, and IntelliJ holds
+     * a ReadAction across that callback — under which `OSProcessHandler`
+     * refuses synchronous execution.
      */
     private fun sidecarPath(strand: String): Path? {
         val wt = strandPath(strand)
         if (!wt.exists()) return null
-        val r = git(wt, "rev-parse", "--git-path", SIDECAR_FILE)
-        if (!r.ok || r.stdout.isBlank()) return null
-        val raw = Path.of(r.stdout)
-        return if (raw.isAbsolute) raw else wt.resolve(raw)
+        return mainCheckout().resolve(".git").resolve("worktrees").resolve(strand).resolve(SIDECAR_FILE)
     }
 
     private fun addToInfoExclude(wt: Path, names: List<String>) {
