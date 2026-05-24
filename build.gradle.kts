@@ -37,7 +37,23 @@ intellijPlatform {
         ideaVersion {
             sinceBuild = "261"
         }
+        // Latest section of CHANGELOG.md → bundled plugin.xml's
+        // <change-notes>. Same section is fed to `gh release create
+        // --notes-file` during publish, so the GH Pages workflow
+        // forwards it into updatePlugins.xml too.
+        changeNotes = provider { latestChangelogSection() }
     }
+}
+
+fun latestChangelogSection(): String {
+    val text = file("CHANGELOG.md").readText()
+    val firstHeading = text.indexOf("\n## ")
+    if (firstHeading < 0) return ""
+    val afterHeadingLine = text.indexOf('\n', firstHeading + 1)
+    if (afterHeadingLine < 0) return ""
+    val nextHeading = text.indexOf("\n## ", afterHeadingLine)
+    val body = if (nextHeading < 0) text.substring(afterHeadingLine) else text.substring(afterHeadingLine, nextHeading)
+    return body.trim()
 }
 
 kotlin {
