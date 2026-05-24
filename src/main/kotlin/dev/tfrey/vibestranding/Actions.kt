@@ -385,34 +385,33 @@ class SummarizeThisStrandAction : AnAction() {
     }
 }
 
-// Invoke `claude -p` via a login shell so the user's PATH (and wherever they
-// installed claude — npm-global, mise, asdf, etc.) is set up. The prompt is
-// passed as $1 inside double quotes, which prevents any shell-metacharacter
-// interpretation regardless of what's in [prompt]. stdin is redirected from
-// /dev/null so claude doesn't wait 3s for piped input before proceeding.
+// Invoke `claude -p` with the shell's PATH/env (ParentEnvironmentType.CONSOLE)
+// so npm-global / mise / asdf installs resolve the same way they do in a
+// terminal — fixes the "GUI app launched from Dock can't find claude" case.
+// A plain `bash -lc` would only source bash login config and miss zsh users
+// who set PATH in .zshrc / .zprofile, which is the common macOS setup.
 private fun runClaudeSummary(worktree: String, prompt: String): String {
-    val pb = ProcessBuilder(
-        "bash",
-        "-lc",
-        "claude -p \"\$1\" < /dev/null",
-        "vibe-stranding-summary",
-        prompt,
-    )
-        .directory(java.io.File(worktree))
-        .redirectErrorStream(true)
+    val cmd = com.intellij.execution.configurations.GeneralCommandLine("claude")
+        .withParameters("-p", prompt)
+        .withWorkDirectory(worktree)
+        .withCharset(Charsets.UTF_8)
+        .withParentEnvironmentType(
+            com.intellij.execution.configurations.GeneralCommandLine.ParentEnvironmentType.CONSOLE,
+        )
     return try {
-        val proc = pb.start()
-        val output = proc.inputStream.bufferedReader().readText()
-        proc.waitFor()
-        if (proc.exitValue() != 0) {
-            "claude exited with code ${proc.exitValue()}:\n\n$output"
-        } else {
-            output.ifBlank { "(claude returned no output)" }
+        val out = com.intellij.execution.process.CapturingProcessHandler(cmd).runProcess(SUMMARY_TIMEOUT_MS)
+        val combined = (out.stdout + out.stderr).trim()
+        when {
+            out.isTimeout -> "claude timed out after ${SUMMARY_TIMEOUT_MS / 1000}s."
+            out.exitCode != 0 -> "claude exited with code ${out.exitCode}:\n\n$combined"
+            else -> combined.ifBlank { "(claude returned no output)" }
         }
     } catch (t: Throwable) {
         "Failed to run claude: ${t.message}"
     }
 }
+
+private const val SUMMARY_TIMEOUT_MS = 5 * 60 * 1000
 
 /** Deletes whichever strand owns the currently-focused terminal tab. */
 class DeleteThisStrandAction : AnAction() {
