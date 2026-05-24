@@ -4,8 +4,11 @@ import com.intellij.ide.impl.OpenProjectTask
 import com.intellij.ide.impl.ProjectUtil
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
+import com.intellij.openapi.actionSystem.ActionGroup
+import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
@@ -212,70 +215,64 @@ class NewStrandAction : AnAction() {
     }
 }
 
-class ResumeStrandAction : AnAction() {
-    override fun actionPerformed(e: AnActionEvent) {
-        val project = e.project ?: return
-        val svc = service(project)
-        val strands = svc.listStrands()
-        if (strands.isEmpty()) {
-            notify(project, "No strands to resume.", NotificationType.WARNING)
-            return
-        }
-        chooseStrand(e, "Resume which strand?", strands) { strand ->
-            resumeStrand(project, svc, strand)
-        }
+/**
+ * Inline action group: each child strand becomes its own clickable entry in
+ * the parent menu, so resuming is a single click. The group is dynamic
+ * (`getChildren` runs at popup time) and renders nothing when no strands
+ * exist — IntelliJ hides empty groups, so the labeled "Resume" separator
+ * also disappears.
+ */
+class ResumeStrandsGroup : ActionGroup() {
+    init {
+        templatePresentation.text = "Resume Strand"
+        isPopup = false
     }
 
-    private fun resumeStrand(project: Project, svc: GitStrands, strand: String) {
-        if (TerminalTabs.focusTerminalTab(project) { strandFromTabName(it) == strand }) {
-            return
-        }
-        // Self-heal symlinks before reopening: a previous spawn may have
-        // failed silently, or something inside the strand may have nuked them.
-        val linkIssues = svc.ensureLinks(strand)
-        val emoji = svc.metadata.read(strand)?.emoji ?: fallbackEmoji(strand)
-        TerminalTabs.openTerminalTab(
+    override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
+
+    override fun getChildren(e: AnActionEvent?): Array<AnAction> {
+        val project = e?.project ?: return emptyArray()
+        val svc = service(project)
+        val strands = svc.listStrands()
+        if (strands.isEmpty()) return emptyArray()
+        return buildList<AnAction> {
+            add(Separator.create("Resume"))
+            strands.forEach { strand ->
+                val emoji = svc.metadata.read(strand)?.emoji ?: fallbackEmoji(strand)
+                add(ResumeOneStrandAction(strand, emoji))
+            }
+        }.toTypedArray()
+    }
+}
+
+private class ResumeOneStrandAction(private val strand: String, emoji: String) : AnAction("$emoji $strand") {
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        resumeStrand(project, service(project), strand)
+    }
+}
+
+private fun resumeStrand(project: Project, svc: GitStrands, strand: String) {
+    if (TerminalTabs.focusTerminalTab(project) { strandFromTabName(it) == strand }) {
+        return
+    }
+    // Self-heal symlinks before reopening: a previous spawn may have
+    // failed silently, or something inside the strand may have nuked them.
+    val linkIssues = svc.ensureLinks(strand)
+    val emoji = svc.metadata.read(strand)?.emoji ?: fallbackEmoji(strand)
+    TerminalTabs.openTerminalTab(
+        project,
+        svc.strandPath(strand).toString(),
+        tabLabel(emoji, strand),
+        RESUME_COMMAND,
+    )
+    notify(project, "Resumed strand '$strand'.", NotificationType.INFORMATION)
+    if (linkIssues.isNotEmpty()) {
+        notify(
             project,
-            svc.strandPath(strand).toString(),
-            tabLabel(emoji, strand),
-            RESUME_COMMAND,
+            "Symlink issues in '$strand':\n${linkIssues.joinToString("\n")}",
+            NotificationType.WARNING,
         )
-        notify(project, "Resumed strand '$strand'.", NotificationType.INFORMATION)
-        if (linkIssues.isNotEmpty()) {
-            notify(
-                project,
-                "Symlink issues in '$strand':\n${linkIssues.joinToString("\n")}",
-                NotificationType.WARNING,
-            )
-        }
-    }
-}
-
-class FinishStrandAction : AnAction() {
-    override fun actionPerformed(e: AnActionEvent) {
-        val project = e.project ?: return
-        val svc = service(project)
-        val strands = svc.listStrands()
-        if (strands.isEmpty()) {
-            notify(project, "No strands found.", NotificationType.WARNING)
-            return
-        }
-        chooseStrand(e, "Finish which strand?", strands) { strand -> runFinish(project, svc, strand) }
-    }
-}
-
-class DeleteStrandAction : AnAction() {
-    override fun actionPerformed(e: AnActionEvent) {
-        val project = e.project ?: return
-        val svc = service(project)
-        val strands = svc.listStrands()
-        if (strands.isEmpty()) {
-            notify(project, "No strands found.", NotificationType.WARNING)
-            return
-        }
-        chooseStrand(e, "Delete which strand?", strands) { strand ->
-            promptAndRunDelete(project, svc, strand)
-        }
     }
 }
 

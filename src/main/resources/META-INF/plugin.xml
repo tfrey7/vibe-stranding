@@ -29,10 +29,10 @@
                     class="dev.tfrey.vibestranding.NewStrandAction"
                     text="New Strand..."
                     description="Create a worktree and terminal tab for a new strand of work"/>
-            <action id="VibeStranding.Resume"
-                    class="dev.tfrey.vibestranding.ResumeStrandAction"
-                    text="Resume Strand..."
-                    description="Open a terminal tab for an existing strand, running 'claude --continue' to pick up its last session"/>
+            <group id="VibeStranding.Resume"
+                   class="dev.tfrey.vibestranding.ResumeStrandsGroup"
+                   text="Resume Strand"/>
+            <separator/>
             <action id="VibeStranding.OpenInIde"
                     class="dev.tfrey.vibestranding.OpenStrandInIdeAction"
                     text="Open Strand in IDE..."
@@ -46,15 +46,6 @@
                     class="dev.tfrey.vibestranding.DeleteThisStrandAction"
                     text="Delete This Strand"
                     description="Delete the strand owning the focused terminal tab without finishing it"/>
-            <separator/>
-            <action id="VibeStranding.Finish"
-                    class="dev.tfrey.vibestranding.FinishStrandAction"
-                    text="Finish Strand..."
-                    description="Rebase a strand onto the default branch, fast-forward it, then delete the worktree"/>
-            <action id="VibeStranding.Delete"
-                    class="dev.tfrey.vibestranding.DeleteStrandAction"
-                    text="Delete Strand..."
-                    description="Remove a strand's worktree and delete its branch"/>
         </group>
     </actions>
 </idea-plugin>
