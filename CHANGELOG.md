@@ -10,6 +10,10 @@ Each release should add a new section at the top. Keep entries terse
 prose — IntelliJ's change-notes view renders a subset of HTML, not
 markdown, so bullet syntax won't render; use sentences.
 
+## 0.3.1 — 2026-05-24
+
+Populate the IDE's "What's New" panel — the bundled plugin.xml now ships with a change-notes element sourced from CHANGELOG.md, so installed copies show release notes in Settings → Plugins.
+
 ## 0.3.0 — 2026-05-24
 
 Persist strand emoji + description across IDE restarts; auto-publish updatePlugins.xml so installed copies can self-update from GitHub Pages; README rewrite.
