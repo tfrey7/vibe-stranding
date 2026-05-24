@@ -172,46 +172,53 @@ class NewStrandAction : AnAction() {
             null,
         )?.trim()?.takeIf { it.isNotEmpty() } ?: return
 
-        runInBackground(project, "Naming strand") {
-            val suggestion = StrandNamer.suggest(description)
-            val (slug, emoji) = if (suggestion != null) {
-                suggestion.slug to suggestion.emoji
-            } else {
-                val s = StrandNamer.naiveSlug(description)
-                s to fallbackEmoji(s)
-            }
-            createStrand(project, slug, emoji, description)
-        }
-    }
+        // Task.Modal (not Backgroundable) so the user keeps a visible signal
+        // that their action is still in flight: naming via claude shell-out +
+        // worktree creation can take a few seconds, and a vanished input
+        // dialog with a tiny status-bar progress is easy to miss.
+        ProgressManager.getInstance().run(object : Task.Modal(project, "New Strand", false) {
+            override fun run(indicator: ProgressIndicator) {
+                indicator.text = "Naming strand…"
+                val suggestion = StrandNamer.suggest(description)
+                val (slug, emoji) = if (suggestion != null) {
+                    suggestion.slug to suggestion.emoji
+                } else {
+                    val s = StrandNamer.naiveSlug(description)
+                    s to fallbackEmoji(s)
+                }
 
-    private fun createStrand(project: Project, strand: String, emoji: String, description: String?) {
-        val svc = service(project)
-        runInBackground(project, "Creating strand '$strand'") {
-            when (val r = svc.createStrand(strand)) {
-                is GitStrands.CreateResult.Ok -> {
-                    svc.metadata.write(strand, StrandMeta(emoji, description))
-                    onEdt {
-                        TerminalTabs.openTerminalTab(
-                            project,
-                            r.path.toString(),
-                            tabLabel(emoji, strand),
-                            STRAND_COMMAND,
-                        )
-                        notify(project, "Created strand '$strand'.", NotificationType.INFORMATION)
-                        if (r.linkIssues.isNotEmpty()) {
-                            notify(
+                indicator.text = "Creating worktree for '$slug'…"
+                val svc = service(project)
+                when (val r = svc.createStrand(slug)) {
+                    is GitStrands.CreateResult.Ok -> {
+                        svc.metadata.write(slug, StrandMeta(emoji, description))
+                        indicator.text = "Opening terminal tab…"
+                        // invokeAndWait so the modal stays up until the tab is
+                        // visible — invokeLater would let it dismiss while the
+                        // EDT work was still queued.
+                        ApplicationManager.getApplication().invokeAndWait {
+                            TerminalTabs.openTerminalTab(
                                 project,
-                                "Symlink issues in '$strand':\n${r.linkIssues.joinToString("\n")}",
-                                NotificationType.WARNING,
+                                r.path.toString(),
+                                tabLabel(emoji, slug),
+                                STRAND_COMMAND,
                             )
+                            notify(project, "Created strand '$slug'.", NotificationType.INFORMATION)
+                            if (r.linkIssues.isNotEmpty()) {
+                                notify(
+                                    project,
+                                    "Symlink issues in '$slug':\n${r.linkIssues.joinToString("\n")}",
+                                    NotificationType.WARNING,
+                                )
+                            }
                         }
                     }
-                }
-                is GitStrands.CreateResult.Failed -> onEdt {
-                    notify(project, r.message, NotificationType.ERROR)
+                    is GitStrands.CreateResult.Failed -> ApplicationManager.getApplication().invokeAndWait {
+                        notify(project, r.message, NotificationType.ERROR)
+                    }
                 }
             }
-        }
+        })
     }
 }
 
