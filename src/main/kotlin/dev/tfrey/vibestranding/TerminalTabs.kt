@@ -195,8 +195,13 @@ object TerminalTabs {
     private const val BUSY_INTERVAL_MS = 400
     private val BUSY_FRAMES = listOf("• ·", "· •")
 
-    private fun renderBusy(baseLabel: String, phase: Int): String =
-        "$baseLabel  ${BUSY_FRAMES[phase % BUSY_FRAMES.size]}"
+    // baseLabel is "<emoji> <strand>"; swap the emoji slot with the busy frame
+    // so the tab reads like the Claude CLI prompt (spinner where the glyph was).
+    private fun renderBusy(baseLabel: String, phase: Int): String {
+        val frame = BUSY_FRAMES[phase % BUSY_FRAMES.size]
+        val spaceIdx = baseLabel.indexOf(' ')
+        return if (spaceIdx >= 0) "$frame${baseLabel.substring(spaceIdx)}" else frame
+    }
 
     /**
      * Flip the strand's tab into / out of a "Claude is working" animation.
