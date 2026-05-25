@@ -7,6 +7,15 @@ import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import git4idea.config.GitExecutableManager
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
+import org.jetbrains.ide.BuiltInServerManager
+import java.net.URLEncoder
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
@@ -154,9 +163,15 @@ class GitStrands(private val project: Project) {
         // strand starts out "dirty" (the symlinks show as untracked), which would
         // trip the finish-time dirty check and also block `git worktree remove`.
         val linksStart = System.currentTimeMillis()
-        val issues = ensureManagedLinks(wt)
+        val issues = ensureManagedLinks(wt).toMutableList()
         addToInfoExclude(wt, PLUGIN_MANAGED_PATHS)
         val linksMs = System.currentTimeMillis() - linksStart
+
+        // Must run before the terminal launches `claude` — Claude only reads
+        // hooks at startup, so a post-launch install would miss the first turn.
+        val hooksStart = System.currentTimeMillis()
+        issues += ensureClaudeHooks(strand)
+        val hooksMs = System.currentTimeMillis() - hooksStart
 
         val refreshStart = System.currentTimeMillis()
         refresh(wt)
@@ -164,7 +179,7 @@ class GitStrands(private val project: Project) {
 
         LOG.info(
             "createStrand '$strand': defaultBranch=${branchMs}ms, worktreeAdd=${addMs}ms, " +
-                "linksAndExclude=${linksMs}ms, refresh=${refreshMs}ms",
+                "linksAndExclude=${linksMs}ms, claudeHooks=${hooksMs}ms, refresh=${refreshMs}ms",
         )
         return CreateResult.Ok(wt, issues)
     }
@@ -242,6 +257,75 @@ class GitStrands(private val project: Project) {
         } catch (t: Throwable) {
             LOG.warn("Could not append to info/exclude at $excludeFile", t)
         }
+    }
+
+    /**
+     * Idempotent: write `<wt>/.claude/settings.local.json` so the strand's
+     * `claude` session signals busy/idle to the plugin via UserPromptSubmit +
+     * Stop hooks. The hook URL bakes in the IDE's current built-in HTTP port
+     * and the strand + project identity, so the plugin can light up the right
+     * tab even when multiple IDE windows are open.
+     *
+     * Safe to re-run on every resume — the file is plugin-owned and the
+     * `.local.json` suffix is the Claude convention for non-checked-in
+     * overrides. We also append it to the worktree's `info/exclude` so it
+     * never sneaks into a finish-time `git add -A`.
+     *
+     * Best-effort: any failure leaves the strand without busy animation but
+     * doesn't otherwise affect its operation.
+     */
+    fun ensureClaudeHooks(strand: String): List<String> {
+        val wt = strandPath(strand)
+        if (!wt.exists()) return listOf("Strand path missing: $wt")
+        val issues = mutableListOf<String>()
+        try {
+            val basePath = project.basePath
+                ?: return listOf("project basePath is null; cannot wire busy hook")
+            val port = BuiltInServerManager.getInstance().port
+            val encStrand = URLEncoder.encode(strand, Charsets.UTF_8)
+            val encProject = URLEncoder.encode(basePath, Charsets.UTF_8)
+            val baseUrl = "http://127.0.0.1:$port/api/vibe-stranding"
+            // `>/dev/null 2>&1 || true` keeps the hook from ever blocking
+            // Claude — a closed IDE or unreachable port silently leaves the
+            // tab static instead of erroring the user's turn.
+            val busyCmd = "curl -sf -X POST '$baseUrl/busy?name=$encStrand&project=$encProject' >/dev/null 2>&1 || true"
+            val idleCmd = "curl -sf -X POST '$baseUrl/idle?name=$encStrand&project=$encProject' >/dev/null 2>&1 || true"
+
+            val json = buildJsonObject {
+                putJsonObject("hooks") {
+                    putJsonArray("UserPromptSubmit") {
+                        addJsonObject {
+                            putJsonArray("hooks") {
+                                addJsonObject {
+                                    put("type", "command")
+                                    put("command", busyCmd)
+                                }
+                            }
+                        }
+                    }
+                    putJsonArray("Stop") {
+                        addJsonObject {
+                            putJsonArray("hooks") {
+                                addJsonObject {
+                                    put("type", "command")
+                                    put("command", idleCmd)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            val text = Json { prettyPrint = true }.encodeToString(JsonElement.serializer(), json) + "\n"
+
+            val claudeDir = wt.resolve(".claude")
+            Files.createDirectories(claudeDir)
+            Files.writeString(claudeDir.resolve("settings.local.json"), text)
+            addToInfoExclude(wt, listOf(".claude/settings.local.json"))
+        } catch (t: Throwable) {
+            LOG.warn("Could not install Claude hooks for strand '$strand'", t)
+            issues.add(".claude/settings.local.json: ${t.message ?: t::class.simpleName}")
+        }
+        return issues
     }
 
     fun finishStrand(strand: String): FinishResult {

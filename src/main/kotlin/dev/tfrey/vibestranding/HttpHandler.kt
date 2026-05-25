@@ -45,6 +45,8 @@ import org.jetbrains.ide.HttpRequestHandler
  *   POST     /api/vibe-stranding/new?name=<kebab>[&emoji=<one-emoji>]
  *   POST     /api/vibe-stranding/finish?name=<kebab>[&delete=true]
  *   POST     /api/vibe-stranding/delete?name=<kebab>[&force=true]
+ *   POST     /api/vibe-stranding/busy?name=<kebab>      (hook: Claude turn started)
+ *   POST     /api/vibe-stranding/idle?name=<kebab>      (hook: Claude turn ended)
  *
  *   --- MCP (JSON-RPC over HTTP, for Claude Code) ---
  *
@@ -95,6 +97,8 @@ class HttpHandler : HttpRequestHandler() {
             "delete" -> doDelete(project, params)
             "list" -> doList(project)
             "get" -> doGet(project, params)
+            "busy" -> doSetBusy(project, params, busy = true)
+            "idle" -> doSetBusy(project, params, busy = false)
             else -> OpResult(HttpResponseStatus.NOT_FOUND, "Unknown endpoint: $endpoint")
         }
         val contentType = if (result.isJson) "application/json; charset=utf-8" else "text/plain; charset=utf-8"
@@ -174,9 +178,12 @@ class HttpHandler : HttpRequestHandler() {
         if (strand !in svc.listStrands()) {
             return OpResult(HttpResponseStatus.NOT_FOUND, "No strand named '$strand'.")
         }
-        // Self-heal symlinks before reopening: a previous spawn may have
-        // failed silently, or something inside the strand may have nuked them.
-        val linkIssues = svc.ensureLinks(strand)
+        // Self-heal symlinks + busy hooks before reopening: a previous spawn
+        // may have failed silently, the strand may predate the busy-hook
+        // feature, or the IDE's built-in HTTP port may have changed since
+        // last create.
+        val issues = svc.ensureLinks(strand).toMutableList()
+        issues += svc.ensureClaudeHooks(strand)
         val meta = svc.metadata.read(strand)
         val emoji = meta?.emoji ?: fallbackEmoji(strand)
         var focused = false
@@ -194,7 +201,7 @@ class HttpHandler : HttpRequestHandler() {
             }
         }
         val verb = if (focused) "Focused" else "Resumed"
-        val warn = if (linkIssues.isEmpty()) "" else "\nSymlink issues:\n${linkIssues.joinToString("\n")}"
+        val warn = if (issues.isEmpty()) "" else "\nSetup issues:\n${issues.joinToString("\n")}"
         return OpResult(HttpResponseStatus.OK, "$verb '$strand'.$warn")
     }
 
@@ -263,6 +270,19 @@ class HttpHandler : HttpRequestHandler() {
             }
         }
         return OpResult(HttpResponseStatus.OK, JSON.encodeToString(JsonElement.serializer(), array), isJson = true)
+    }
+
+    /**
+     * Toggle the strand's tab into / out of a "Claude is working" animation.
+     * Hook-only endpoint — wired up by the per-strand `.claude/settings.local.json`
+     * written at strand creation, so Claude's UserPromptSubmit hook flips it
+     * busy and Stop flips it idle.
+     */
+    private fun doSetBusy(project: Project, params: Map<String, String>, busy: Boolean): OpResult {
+        val strand = requireStrandName(params)
+            ?: return OpResult(HttpResponseStatus.BAD_REQUEST, "Missing or invalid 'name'.")
+        TerminalTabs.setBusy(project, strand, busy)
+        return OpResult(HttpResponseStatus.OK, if (busy) "busy" else "idle")
     }
 
     private fun doGet(project: Project, params: Map<String, String>): OpResult {

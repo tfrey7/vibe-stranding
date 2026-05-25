@@ -304,26 +304,33 @@ private class ResumeOneStrandAction(private val strand: String, emoji: String) :
 
 private fun resumeStrand(project: Project, svc: GitStrands, strand: String) {
     if (TerminalTabs.focusTabForStrand(project, strand)) return
-    // Self-heal symlinks before reopening: a previous spawn may have
-    // failed silently, or something inside the strand may have nuked them.
-    val linkIssues = svc.ensureLinks(strand)
-    val meta = svc.metadata.read(strand)
-    val emoji = meta?.emoji ?: fallbackEmoji(strand)
-    TerminalTabs.openTerminalTab(
-        project,
-        svc.strandPath(strand).toString(),
-        tabLabel(emoji, strand),
-        RESUME_COMMAND,
-        strand,
-        meta?.background,
-    )
-    notify(project, "Resumed strand '$strand'.", NotificationType.INFORMATION)
-    if (linkIssues.isNotEmpty()) {
-        notify(
+    // Self-heal runs in the background because [GitStrands.ensureClaudeHooks]
+    // shells out to git (via addToInfoExclude), which OSProcessHandler refuses
+    // synchronously on the EDT. Symlink-only self-heal used to be EDT-safe,
+    // but the busy-hook install made the broader resume EDT-unsafe.
+    runInBackground(project, "Resuming '$strand'") {
+        val issues = svc.ensureLinks(strand).toMutableList()
+        issues += svc.ensureClaudeHooks(strand)
+        val meta = svc.metadata.read(strand)
+        val emoji = meta?.emoji ?: fallbackEmoji(strand)
+        TerminalTabs.openTerminalTab(
             project,
-            "Symlink issues in '$strand':\n${linkIssues.joinToString("\n")}",
-            NotificationType.WARNING,
+            svc.strandPath(strand).toString(),
+            tabLabel(emoji, strand),
+            RESUME_COMMAND,
+            strand,
+            meta?.background,
         )
+        onEdt {
+            notify(project, "Resumed strand '$strand'.", NotificationType.INFORMATION)
+            if (issues.isNotEmpty()) {
+                notify(
+                    project,
+                    "Setup issues in '$strand':\n${issues.joinToString("\n")}",
+                    NotificationType.WARNING,
+                )
+            }
+        }
     }
 }
 

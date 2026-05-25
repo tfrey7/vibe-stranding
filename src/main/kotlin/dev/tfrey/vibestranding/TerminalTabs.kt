@@ -14,6 +14,7 @@ import com.jediterm.terminal.ui.TerminalPanel
 import org.jetbrains.plugins.terminal.ShellTerminalWidget
 import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 import java.awt.Color
+import javax.swing.Timer
 
 private val LOG = logger<TerminalTabsService>()
 
@@ -153,14 +154,90 @@ object TerminalTabs {
 
     /** EDT. Re-label an existing strand's tab; no-op if the tab is gone. */
     fun relabelTab(project: Project, strand: String, newName: String) {
-        findContentForStrand(project, strand)?.displayName = newName
+        val content = findContentForStrand(project, strand) ?: return
+        val state = animations[content]
+        if (state == null) {
+            content.displayName = newName
+        } else {
+            // Mid-animation: stash the new base label and re-render the current
+            // frame against it so the emoji/name swap is visible immediately
+            // without the title flickering back to the unanimated form.
+            state.baseLabel = newName
+            content.displayName = renderBusy(newName, state.phase)
+        }
     }
 
     /** EDT. Close the strand's tab; no-op if nothing matches. */
     fun closeTabForStrand(project: Project, strand: String) {
         val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Terminal") ?: return
         val content = findContentForStrand(project, strand) ?: return
+        stopAnimation(content)
         toolWindow.contentManager.removeContent(content, true)
+    }
+
+    // --- Busy-state animation -------------------------------------------------
+
+    /**
+     * Per-tab animation state. [baseLabel] is the un-animated displayName we
+     * restore on idle (and re-render against on each tick + on relabel).
+     * [phase] indexes into [BUSY_FRAMES].
+     */
+    private data class AnimationState(var baseLabel: String, val timer: Timer, var phase: Int = 0)
+
+    /**
+     * Keyed by [Content] so the entry naturally disposes with the tab. We
+     * additionally clear it from [closeTabForStrand] and on each tick if the
+     * content has been detached from its manager (e.g. closed by the user via
+     * the tab's × button).
+     */
+    private val animations = mutableMapOf<Content, AnimationState>()
+
+    private const val BUSY_INTERVAL_MS = 400
+    private val BUSY_FRAMES = listOf("• ·", "· •")
+
+    private fun renderBusy(baseLabel: String, phase: Int): String =
+        "$baseLabel  ${BUSY_FRAMES[phase % BUSY_FRAMES.size]}"
+
+    /**
+     * Flip the strand's tab into / out of a "Claude is working" animation.
+     * Safe to call from any thread; bounced to the EDT internally. Repeated
+     * calls with the same state are no-ops, so hook-fired transitions are
+     * idempotent.
+     */
+    fun setBusy(project: Project, strand: String, busy: Boolean) {
+        ApplicationManager.getApplication().invokeLater {
+            val content = findContentForStrand(project, strand) ?: return@invokeLater
+            if (busy) startAnimation(content) else stopAnimation(content)
+        }
+    }
+
+    private fun startAnimation(content: Content) {
+        if (animations.containsKey(content)) return
+        val baseLabel = content.displayName
+        val timer = Timer(BUSY_INTERVAL_MS, null)
+        val state = AnimationState(baseLabel, timer)
+        animations[content] = state
+        timer.addActionListener {
+            // Tab gone (user closed it, IDE shut its terminal panel, etc.):
+            // tear down rather than chase a detached Content.
+            if (content.manager == null) {
+                stopAnimation(content)
+                return@addActionListener
+            }
+            state.phase = (state.phase + 1) % BUSY_FRAMES.size
+            content.displayName = renderBusy(state.baseLabel, state.phase)
+        }
+        // Render frame 0 immediately so the user sees the animation start on
+        // the same EDT pass; the timer only drives subsequent frames.
+        content.displayName = renderBusy(baseLabel, 0)
+        timer.start()
+    }
+
+    private fun stopAnimation(content: Content) {
+        val state = animations.remove(content) ?: return
+        state.timer.stop()
+        // Restore only if the tab is still around; otherwise displayName is moot.
+        if (content.manager != null) content.displayName = state.baseLabel
     }
 
     /** EDT. Focus the strand's tab; returns true if a tab was activated. */
