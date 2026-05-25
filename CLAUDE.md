@@ -55,3 +55,48 @@ Don't add a second version string elsewhere.
   runs on edits — let it.
 - `./gradlew buildPlugin` is the canonical build. Don't hand-zip from
   `build/libs/`.
+
+## Threading (EDT vs background)
+
+EDT violations only show up at runtime — `Slow operations are prohibited
+on EDT` or `Access is allowed from event dispatch thread only`. Get this
+right at write time; the user shouldn't have to run the IDE and paste
+the stack to catch it.
+
+**On the EDT by default (don't block it):**
+- `AnAction.actionPerformed` / `update`, `DataContext` access
+- Anything Swing: `Messages.show*`, `JBPopupFactory`, `JComponent`,
+  `Content`, `ToolWindow`, `Notification.notify`
+- Terminal-widget creation (`TerminalToolWindowManager.createLocalShellWidget`),
+  tab color/label, `Content.setTabColor`, `Swing.Timer` ticks
+
+**MUST run off the EDT:**
+- Subprocess: `GeneralCommandLine`, `OSProcessHandler`,
+  `CapturingProcessHandler` (git, claude, zsh). Platform actively
+  asserts — not a soft warning.
+- Every `GitStrands` method (they all eventually shell out — including
+  ones that look pure like `ensureLinks` / `ensureClaudeHooks`)
+- Network and non-trivial file IO
+
+**Helpers already in `Actions.kt`** — use them, don't roll your own:
+- `runInBackground(project, "Title") { ... }` wraps `Task.Backgroundable`
+- `onEdt { ... }` wraps `ApplicationManager.getApplication().invokeLater`
+- `HttpHandler` is the exception: it uses `invokeAndWait` because Netty
+  needs the result before writing the response
+
+Typical `AnAction` shape:
+```kotlin
+override fun actionPerformed(e: AnActionEvent) {
+    val project = e.project ?: return
+    // EDT-safe prompts go here (Messages.showInputDialog, etc.)
+    runInBackground(project, "Doing X") {
+        val r = svc.gitWork(strand)         // off EDT
+        onEdt { notify(project, r.message) } // back on EDT for Swing
+    }
+}
+```
+
+**KDoc the threading on anything non-trivial** — `/** EDT. ... */`,
+`/** Safe to call from any thread — bounced to EDT internally. */`,
+or `/** Must be called off the EDT. */`. If you can't decide which to
+write, the code is the bug.
