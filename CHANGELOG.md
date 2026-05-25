@@ -10,6 +10,10 @@ Each release should add a new section at the top. Keep entries terse
 prose — IntelliJ's change-notes view renders a subset of HTML, not
 markdown, so bullet syntax won't render; use sentences.
 
+## 0.5.1 — 2026-05-24
+
+Strand tabs now animate while their claude session is mid-turn. New strands are wired up automatically via a per-strand .claude/settings.local.json hook file; existing strands self-heal the hooks on Resume Strand. The tab title cycles through a short busy indicator on UserPromptSubmit and restores its idle label on Stop, so it's easy to tell at a glance which siblings are working.
+
 ## 0.5.0 — 2026-05-24
 
 Fix Summarize This Strand on macOS for users whose claude install lives on a PATH set up in .zshrc / .zprofile (npm-global, mise, asdf). The action previously shelled out via bash -lc, which only sources bash login config, so zsh users hit "claude: command not found". It now uses the same shell-environment path as the strand-emoji subprocess. Also adds a 5-minute timeout so a hung summary surfaces instead of waiting forever.
