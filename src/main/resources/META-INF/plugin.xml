@@ -43,11 +43,10 @@
                    class="dev.tfrey.vibestranding.ResumeStrandsGroup"
                    text="Resume Strand"/>
             <separator/>
-            <action id="VibeStranding.OpenInIde"
-                    class="dev.tfrey.vibestranding.OpenStrandInIdeAction"
-                    text="Open Strand in IDE..."
-                    description="Open a strand's worktree as a project in a new IDE window"/>
-            <separator/>
+            <action id="VibeStranding.ViewCode"
+                    class="dev.tfrey.vibestranding.ViewThisStrandsCodeAction"
+                    text="View This Strand's Code"
+                    description="Open the focused tab's strand worktree as a project in a new IDE window"/>
             <action id="VibeStranding.SummarizeThis"
                     class="dev.tfrey.vibestranding.SummarizeThisStrandAction"
                     text="Summarize This Strand"

@@ -16,7 +16,6 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
-import com.intellij.openapi.ui.popup.JBPopupFactory
 import kotlin.io.path.exists
 import kotlin.math.abs
 
@@ -101,19 +100,6 @@ private fun runInBackground(project: Project, title: String, work: () -> Unit) {
     ProgressManager.getInstance().run(object : Task.Backgroundable(project, title, false) {
         override fun run(indicator: ProgressIndicator) = work()
     })
-}
-
-private fun chooseStrand(e: AnActionEvent, title: String, strands: List<String>, onChosen: (String) -> Unit) {
-    if (strands.size == 1) {
-        onChosen(strands.first())
-        return
-    }
-    JBPopupFactory.getInstance()
-        .createPopupChooserBuilder(strands)
-        .setTitle(title)
-        .setItemChosenCallback(onChosen)
-        .createPopup()
-        .showInBestPositionFor(e.dataContext)
 }
 
 private fun service(project: Project): GitStrands = project.getService(GitStrands::class.java)
@@ -338,23 +324,22 @@ internal fun resumeStrand(project: Project, svc: GitStrands, strand: String) {
     }
 }
 
-class OpenStrandInIdeAction : AnAction() {
+/** Opens the focused tab's strand worktree as a project in a new IDE window. */
+class ViewThisStrandsCodeAction : AnAction() {
+    override fun update(e: AnActionEvent) {
+        val project = e.project
+        e.presentation.isEnabled = project != null && focusedStrand(project) != null
+    }
+
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val svc = service(project)
-        val strands = svc.listStrands()
-        if (strands.isEmpty()) {
-            notify(project, "No strands to open.", NotificationType.WARNING)
+        val strand = focusedStrand(project) ?: return
+        val path = service(project).strandPath(strand)
+        if (!path.exists()) {
+            notify(project, "Strand path missing: $path", NotificationType.ERROR)
             return
         }
-        chooseStrand(e, "Open which strand in IDE?", strands) { strand ->
-            val path = svc.strandPath(strand)
-            if (!path.exists()) {
-                notify(project, "Strand path missing: $path", NotificationType.ERROR)
-                return@chooseStrand
-            }
-            ProjectUtil.openOrImport(path, OpenProjectTask { forceOpenInNewFrame = true })
-        }
+        ProjectUtil.openOrImport(path, OpenProjectTask { forceOpenInNewFrame = true })
     }
 }
 
