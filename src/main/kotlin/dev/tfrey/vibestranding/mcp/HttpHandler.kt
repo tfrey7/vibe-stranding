@@ -5,7 +5,6 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
 import dev.tfrey.vibestranding.core.GitStrands
 import dev.tfrey.vibestranding.core.RESUME_COMMAND
-import dev.tfrey.vibestranding.core.STRAND_COMMAND
 import dev.tfrey.vibestranding.core.STRAND_NAME
 import dev.tfrey.vibestranding.core.Settings
 import dev.tfrey.vibestranding.core.StrandDescriber
@@ -13,6 +12,7 @@ import dev.tfrey.vibestranding.core.StrandMeta
 import dev.tfrey.vibestranding.core.StrandNamer
 import dev.tfrey.vibestranding.core.fallbackEmoji
 import dev.tfrey.vibestranding.core.pickStrandBackground
+import dev.tfrey.vibestranding.core.strandCommand
 import dev.tfrey.vibestranding.core.tabLabel
 import dev.tfrey.vibestranding.ui.TerminalTabs
 import io.netty.buffer.Unpooled
@@ -53,8 +53,8 @@ import org.jetbrains.ide.HttpRequestHandler
  *
  *   GET|POST /api/vibe-stranding/list                         (JSON array)
  *   GET|POST /api/vibe-stranding/get?name=<kebab>             (JSON object)
- *   POST     /api/vibe-stranding/new?description=<free text>
- *   POST     /api/vibe-stranding/new?name=<kebab>[&emoji=<one-emoji>]
+ *   POST     /api/vibe-stranding/new?description=<free text>[&prompt=<initial claude turn>]
+ *   POST     /api/vibe-stranding/new?name=<kebab>[&emoji=<one-emoji>][&prompt=<initial claude turn>]
  *   POST     /api/vibe-stranding/finish?name=<kebab>[&delete=true]
  *   POST     /api/vibe-stranding/delete?name=<kebab>[&force=true]
  *   POST     /api/vibe-stranding/busy?name=<kebab>      (hook: Claude turn started)
@@ -133,7 +133,12 @@ class HttpHandler : HttpRequestHandler() {
         val explicitName = params["name"]?.trim().orEmpty()
         val description = params["description"]?.trim().orEmpty()
         val explicitEmoji = params["emoji"]?.takeIf { it.isNotBlank() }
+        val prompt = params["prompt"]?.trim().orEmpty()
 
+        // Naming source: explicit `name` wins, then `description`, then `prompt`
+        // (so callers that only pass a brief still get a slug + emoji). The
+        // prompt itself is also passed to claude as the first turn — see
+        // [strandCommand] — but that's independent of where the name came from.
         val (strand, inferredEmoji) = when {
             explicitName.isNotEmpty() -> {
                 if (!STRAND_NAME.matches(explicitName)) {
@@ -144,17 +149,18 @@ class HttpHandler : HttpRequestHandler() {
                 }
                 explicitName to fallbackEmoji(explicitName)
             }
-            description.isNotEmpty() -> {
+            description.isNotEmpty() || prompt.isNotEmpty() -> {
+                val seed = description.ifEmpty { prompt }
                 // Naive slug is authoritative for the strand id (= dir +
                 // branch name), so the tab label always matches on-disk
                 // identity. LLM is consulted for an emoji only.
-                val slug = StrandNamer.naiveSlug(description)
-                val emoji = StrandNamer.suggestEmoji(description) ?: fallbackEmoji(slug)
+                val slug = StrandNamer.naiveSlug(seed)
+                val emoji = StrandNamer.suggestEmoji(seed) ?: fallbackEmoji(slug)
                 slug to emoji
             }
             else -> return OpResult(
                 HttpResponseStatus.BAD_REQUEST,
-                "Pass either 'name' (kebab slug) or 'description' (free text).",
+                "Pass 'name' (kebab slug), 'description' (free text), or 'prompt' (initial claude turn).",
             )
         }
 
@@ -164,23 +170,29 @@ class HttpHandler : HttpRequestHandler() {
             svc.listStrands().mapNotNull { svc.metadata.read(it)?.background },
         )
 
+        // Stored description falls back to the prompt so the resume menu and
+        // generated-blurb pipeline have something human-readable to work with
+        // when the caller only supplied a prompt.
+        val storedDescription = description.ifEmpty { prompt }.takeIf { it.isNotEmpty() }
+
         return when (val r = svc.createStrand(strand)) {
             is GitStrands.CreateResult.Ok -> {
                 svc.metadata.write(
                     strand,
-                    StrandMeta(emoji, description.takeIf { it.isNotEmpty() }, background),
+                    StrandMeta(emoji, storedDescription, background),
                 )
                 project.getService(StrandDescriber::class.java).schedule(strand)
                 TerminalTabs.openTerminalTab(
                     project,
                     r.path.toString(),
                     tabLabel(emoji, strand),
-                    STRAND_COMMAND,
+                    strandCommand(prompt.takeIf { it.isNotEmpty() }),
                     strand,
                     background,
                 )
                 val warn = if (r.linkIssues.isEmpty()) "" else "\nSymlink issues:\n${r.linkIssues.joinToString("\n")}"
-                OpResult(HttpResponseStatus.OK, "Created strand '$strand' $emoji at ${r.path}$warn")
+                val ignited = if (prompt.isNotEmpty()) " (claude started with the supplied prompt)" else ""
+                OpResult(HttpResponseStatus.OK, "Created strand '$strand' $emoji at ${r.path}$ignited$warn")
             }
             is GitStrands.CreateResult.Failed ->
                 OpResult(HttpResponseStatus.CONFLICT, r.message)
@@ -556,6 +568,10 @@ class HttpHandler : HttpRequestHandler() {
                     "a named terminal tab in the IDE running `claude`. " +
                     "Pass either a free-text `description` (the plugin coins a kebab slug + emoji via " +
                     "claude haiku) or an explicit `name`. " +
+                    "Optionally pass `prompt` to seed the new strand's claude session with a first " +
+                    "user turn — use this when there's already enough detail to start implementing, " +
+                    "so the new session can begin work immediately instead of waiting for the user to " +
+                    "restate the brief. " +
                     "Use whenever the user asks to start, create, spin up, or begin a " +
                     "strand / feature / branch of work.",
             )
@@ -580,6 +596,17 @@ class HttpHandler : HttpRequestHandler() {
                     putJsonObject("emoji") {
                         put("type", "string")
                         put("description", "Override the tab emoji. Set only when the user explicitly asked for one.")
+                    }
+                    putJsonObject("prompt") {
+                        put("type", "string")
+                        put(
+                            "description",
+                            "Initial user turn to hand to the new strand's claude session. Include " +
+                                "concrete acceptance criteria, file pointers, or constraints the new " +
+                                "session would otherwise have to ask for — it has no context from " +
+                                "this conversation. Omit if the user hasn't given enough detail to " +
+                                "start work without further clarification.",
+                        )
                     }
                     putJsonObject("project") {
                         put("type", "string")

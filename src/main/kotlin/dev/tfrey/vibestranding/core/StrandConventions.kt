@@ -13,6 +13,21 @@ const val STRAND_COMMAND = "claude"
 // (e.g. created then closed without interacting), where `--continue` errors.
 const val RESUME_COMMAND = "claude --continue || claude"
 
+/**
+ * Build the initial command for a strand's terminal tab. With no [prompt],
+ * this is just bare `claude` (interactive REPL). With a [prompt], the prompt
+ * is passed as a positional argument so claude starts the REPL with it as the
+ * first user turn — letting callers ignite work the moment the tab opens
+ * instead of waiting for the user to type the brief themselves.
+ */
+fun strandCommand(prompt: String?): String =
+    if (prompt.isNullOrBlank()) STRAND_COMMAND else "$STRAND_COMMAND ${shellSingleQuote(prompt)}"
+
+// POSIX single-quote escape: wrap in `'…'`, replacing every embedded `'` with
+// the `'\''` sequence (close-quote, escaped quote, reopen-quote). Safe for
+// arbitrary text including newlines and shell metacharacters.
+private fun shellSingleQuote(s: String): String = "'" + s.replace("'", "'\\''") + "'"
+
 // Sent to `claude -p` inside the strand's worktree; the subprocess has no
 // conversation context, so we point it at git as the source of truth.
 const val SUMMARIZE_PROMPT =
