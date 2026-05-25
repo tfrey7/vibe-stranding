@@ -58,7 +58,6 @@ private fun afterDelete(project: Project, strand: String, result: GitStrands.Git
     onEdt {
         if (result.ok) {
             TerminalTabs.closeTabForStrand(project, strand)
-            notify(project, "Deleted '$strand'.", NotificationType.INFORMATION)
         } else {
             notify(project, "Delete failed:\n${result.stderr}", NotificationType.ERROR)
         }
@@ -69,9 +68,6 @@ private fun runFinish(project: Project, svc: GitStrands, strand: String) {
     runInBackground(project, "Finishing '$strand'") {
         when (val r = svc.finishStrand(strand)) {
             is GitStrands.FinishResult.Finished -> {
-                onEdt {
-                    notify(project, "Finished '$strand' (${r.commits} commit(s)).", NotificationType.INFORMATION)
-                }
                 // Always delete on a successful finish — if the user didn't want
                 // the strand gone they wouldn't have finished it.
                 afterDelete(project, strand, svc.deleteStrand(strand, force = false))
@@ -153,9 +149,8 @@ class NewStrandAction : AnAction() {
                         strand,
                         background,
                     )
-                    onEdt {
-                        notify(project, "Created strand '$strand'.", NotificationType.INFORMATION)
-                        if (result.linkIssues.isNotEmpty()) {
+                    if (result.linkIssues.isNotEmpty()) {
+                        onEdt {
                             notify(
                                 project,
                                 "Symlink issues in '$strand':\n${result.linkIssues.joinToString("\n")}",
