@@ -13,6 +13,17 @@ change-notes view renders a subset of HTML, not markdown, so use
 are fine. GitHub release notes and `updatePlugins.xml` render the same
 HTML, so one format works for all three destinations.
 
+## 0.7.0 — 2026-05-25
+
+<ul>
+<li><em>View This Strand's Code</em> now hands the strand's running <code>claude</code> session off to the new IDE window instead of stranding it in the main window — the source tab closes and a <code>claude --continue</code> tab opens in the worktree project. Disabled while the strand's turn is mid-flight so the hand-off can't lose an in-progress reply. The worktree window's Resume Strand dropdown also surfaces the worktree-self entry, so the tab can be re-opened after being killed.</li>
+<li>New <em>Create Strand From Selection</em> actions seed a new strand's claude session with selected text as its first prompt. Available from the editor / Run-Debug console right-click when text is selected, and from the Vibe Stranding dropdown when the focused terminal tab has a JediTerm selection.</li>
+<li>The <code>new_strand</code> MCP tool now accepts an optional <code>prompt</code> that's sent to the new strand's claude session on launch, so callers can ignite work in one step instead of spawning + typing.</li>
+<li>Support <code>.worktreeinclude</code> (gitignore syntax) for copying gitignored files into new strands — mirrors <code>claude --worktree</code>'s mechanism. Existing destination files are never overwritten, so the <code>node_modules</code> / <code>.env</code> symlinks take precedence and strand-local edits survive resume. With no file present, falls back to a built-in <code>.env.*</code> / <code>.envrc</code> pattern list so a typical strand picks up <code>.env.local</code> without per-project setup. Runs on create and on Resume Strand self-heal.</li>
+<li>Dropped the bottom-right balloons announcing every strand create, delete, and finish — they were reading like log spam. Warnings and errors still notify.</li>
+<li>Busy-state tab animation now matches the Claude CLI's dot: a single bouncing middle-dot (<code>·</code>) in a 2-char window, 600ms cadence (was 400ms).</li>
+</ul>
+
 ## 0.6.1 — 2026-05-25
 
 <ul>
