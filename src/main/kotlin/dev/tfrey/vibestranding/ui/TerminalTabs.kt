@@ -200,8 +200,8 @@ object TerminalTabs {
      */
     private val animations = mutableMapOf<Content, AnimationState>()
 
-    private const val BUSY_INTERVAL_MS = 400
-    private val BUSY_FRAMES = listOf("• ·", "· •")
+    private const val BUSY_INTERVAL_MS = 600
+    private val BUSY_FRAMES = listOf("· ", " ·")
 
     // baseLabel is "<emoji> <strand>"; swap the emoji slot with the busy frame
     // so the tab reads like the Claude CLI prompt (spinner where the glyph was).
