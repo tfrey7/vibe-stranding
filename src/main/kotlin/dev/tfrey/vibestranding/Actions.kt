@@ -373,9 +373,10 @@ class FinishThisStrandAction : AnAction() {
 }
 
 /**
- * Runs `claude -p` in the focused strand's worktree, asks for a summary of the
- * work so far, and renders the result in the Vibe Stranding Summary tool window.
- * The strand's live claude session is untouched.
+ * Asks the configured [AgenticLmClient] to summarize the strand using
+ * filesystem tools (`git log` / `git diff`) and renders the result in the
+ * Vibe Stranding Summary tool window. The strand's live claude session is
+ * untouched.
  */
 class SummarizeThisStrandAction : AnAction() {
     override fun update(e: AnActionEvent) {
@@ -386,39 +387,22 @@ class SummarizeThisStrandAction : AnAction() {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val strand = focusedStrand(project) ?: return
-        val worktree = service(project).strandPath(strand).toString()
+        val worktree = service(project).strandPath(strand)
 
         onEdt { showStrandSummary(project, strand, "Summarizing '$strand'…") }
         runInBackground(project, "Summarizing '$strand'") {
-            val output = runClaudeSummary(worktree, SUMMARIZE_PROMPT)
+            val result = LmClients.agentic().completeInWorktree(
+                prompt = SUMMARIZE_PROMPT,
+                worktree = worktree,
+                timeoutMs = SUMMARY_TIMEOUT_MS,
+            )
+            val output = when (result) {
+                is LmResult.Ok -> result.text
+                is LmResult.Timeout -> "Summary timed out after ${result.afterMs / 1000}s."
+                is LmResult.Error -> result.message
+            }
             onEdt { showStrandSummary(project, strand, output) }
         }
-    }
-}
-
-// Invoke `claude -p` with the shell's PATH/env (ParentEnvironmentType.CONSOLE)
-// so npm-global / mise / asdf installs resolve the same way they do in a
-// terminal — fixes the "GUI app launched from Dock can't find claude" case.
-// A plain `bash -lc` would only source bash login config and miss zsh users
-// who set PATH in .zshrc / .zprofile, which is the common macOS setup.
-private fun runClaudeSummary(worktree: String, prompt: String): String {
-    val cmd = com.intellij.execution.configurations.GeneralCommandLine("claude")
-        .withParameters("-p", prompt)
-        .withWorkDirectory(worktree)
-        .withCharset(Charsets.UTF_8)
-        .withParentEnvironmentType(
-            com.intellij.execution.configurations.GeneralCommandLine.ParentEnvironmentType.CONSOLE,
-        )
-    return try {
-        val out = com.intellij.execution.process.CapturingProcessHandler(cmd).runProcess(SUMMARY_TIMEOUT_MS)
-        val combined = (out.stdout + out.stderr).trim()
-        when {
-            out.isTimeout -> "claude timed out after ${SUMMARY_TIMEOUT_MS / 1000}s."
-            out.exitCode != 0 -> "claude exited with code ${out.exitCode}:\n\n$combined"
-            else -> combined.ifBlank { "(claude returned no output)" }
-        }
-    } catch (t: Throwable) {
-        "Failed to run claude: ${t.message}"
     }
 }
 

@@ -1,7 +1,5 @@
 package dev.tfrey.vibestranding
 
-import com.intellij.execution.configurations.GeneralCommandLine
-import com.intellij.execution.process.CapturingProcessHandler
 import com.intellij.openapi.diagnostic.logger
 
 private val LOG = logger<StrandNamerService>()
@@ -16,10 +14,10 @@ private class StrandNamerService
  *  - [naiveSlug] is fully local and authoritative — the strand id (= dir
  *    + branch name) is always the naive slug of the user's description, so
  *    the tab name matches the on-disk identity.
- *  - [suggestEmoji] is best-effort: shells out to `claude --model haiku`
- *    to pick a semantically meaningful single emoji. Any failure (claude
- *    not on PATH, network down, unparseable output) returns null and the
- *    caller falls back to [Actions.fallbackEmoji].
+ *  - [suggestEmoji] is best-effort: asks the configured [LmClient] (a Haiku-
+ *    class model via [LmTier.Fast]) to pick a semantically meaningful single
+ *    emoji. Any failure (LM unavailable, timeout, unparseable output) returns
+ *    null and the caller falls back to [Actions.fallbackEmoji].
  */
 object StrandNamer {
 
@@ -31,42 +29,24 @@ Reply with the emoji only — no quotes, no code fences, no prose, nothing else.
 Work: %s"""
 
     fun suggestEmoji(description: String): String? {
-        val cmd = GeneralCommandLine("claude")
-            // Haiku is plenty for picking an emoji, and keeps the wait short.
-            // The alias (not a pinned model id) tracks whatever the current
-            // Haiku is.
-            .withParameters("--model", "haiku", "-p", PROMPT_TEMPLATE.format(description))
-            .withCharset(Charsets.UTF_8)
-            // Use the shell's PATH/env so we behave like the terminal — fixes the
-            // macOS "GUI app launched from Dock can't find claude" issue.
-            .withParentEnvironmentType(GeneralCommandLine.ParentEnvironmentType.CONSOLE)
-
-        return try {
-            val started = System.currentTimeMillis()
-            val out = CapturingProcessHandler(cmd).runProcess(TIMEOUT_MS)
-            val elapsed = System.currentTimeMillis() - started
-            LOG.info("claude haiku emoji subprocess: ${elapsed}ms (exit=${out.exitCode})")
-            if (out.exitCode != 0) {
-                LOG.warn("claude -p exit ${out.exitCode}: ${out.stderr}")
-                return null
-            }
-            // Take the first non-empty line and strip common decorations
-            // (quotes, backticks, surrounding whitespace). Haiku usually
-            // obeys the "emoji only" instruction, but defensive-trim anyway.
-            val raw = out.stdout.lineSequence()
-                .map { it.trim() }
-                .firstOrNull { it.isNotEmpty() }
-                ?.trim('"', '\'', '`', ' ')
-            if (raw.isNullOrBlank()) {
-                LOG.warn("claude -p returned no usable emoji: ${out.stdout}")
-                null
-            } else {
-                raw
-            }
-        } catch (t: Throwable) {
-            LOG.warn("claude -p failed to launch", t)
-            null
+        val prompt = PROMPT_TEMPLATE.format(description)
+        val result = LmClients.client().complete(prompt, tier = LmTier.Fast, timeoutMs = TIMEOUT_MS)
+        val text = when (result) {
+            is LmResult.Ok -> result.text
+            is LmResult.Timeout, is LmResult.Error -> return null
         }
+        // Take the first non-empty line and strip common decorations
+        // (quotes, backticks, surrounding whitespace). Haiku usually obeys
+        // the "emoji only" instruction, but defensive-trim anyway.
+        val emoji = text.lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotEmpty() }
+            ?.trim('"', '\'', '`', ' ')
+        if (emoji.isNullOrBlank()) {
+            LOG.warn("LM returned no usable emoji: $text")
+            return null
+        }
+        return emoji
     }
 
     /**
