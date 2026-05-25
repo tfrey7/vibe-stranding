@@ -21,7 +21,12 @@
                     secondary="true"
                     icon="/icons/vibe-stranding.svg"
                     factoryClass="dev.tfrey.vibestranding.StrandSummaryToolWindowFactory"/>
-        <!-- GitStrands is a @Service(PROJECT); no registration needed. -->
+        <postStartupActivity implementation="dev.tfrey.vibestranding.ResumeAllStrandsActivity"/>
+        <projectConfigurable id="dev.tfrey.vibestranding.settings"
+                             parentId="tools"
+                             displayName="Vibe Stranding"
+                             instance="dev.tfrey.vibestranding.VibeStrandingConfigurable"/>
+        <!-- GitStrands and VibeStrandingSettings are @Service(PROJECT); no registration needed. -->
     </extensions>
 
     <actions>

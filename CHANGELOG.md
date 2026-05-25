@@ -10,6 +10,10 @@ Each release should add a new section at the top. Keep entries terse
 prose — IntelliJ's change-notes view renders a subset of HTML, not
 markdown, so bullet syntax won't render; use sentences.
 
+## Unreleased
+
+When a project opens, every existing strand now gets its terminal tab restored automatically, running <code>claude --continue</code> so each worktree's claude session picks up where it left off. The behavior is on by default and can be toggled at Settings → Tools → Vibe Stranding.
+
 ## 0.5.1 — 2026-05-24
 
 Strand tabs now animate while their claude session is mid-turn. New strands are wired up automatically via a per-strand .claude/settings.local.json hook file; existing strands self-heal the hooks on Resume Strand. The tab title cycles through a short busy indicator on UserPromptSubmit and restores its idle label on Stop, so it's easy to tell at a glance which siblings are working.

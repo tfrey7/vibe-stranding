@@ -306,7 +306,7 @@ private class ResumeOneStrandAction(private val strand: String, emoji: String) :
     }
 }
 
-private fun resumeStrand(project: Project, svc: GitStrands, strand: String) {
+internal fun resumeStrand(project: Project, svc: GitStrands, strand: String) {
     if (TerminalTabs.focusTabForStrand(project, strand)) return
     // Self-heal runs in the background because [GitStrands.ensureClaudeHooks]
     // shells out to git (via addToInfoExclude), which OSProcessHandler refuses
