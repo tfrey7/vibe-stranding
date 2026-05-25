@@ -12,6 +12,7 @@ import com.intellij.terminal.TerminalColorPalette
 import com.intellij.ui.content.Content
 import com.jediterm.terminal.ui.TerminalPanel
 import org.jetbrains.plugins.terminal.ShellTerminalWidget
+import org.jetbrains.plugins.terminal.TerminalTabState
 import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 import java.awt.Color
 import javax.swing.Timer
@@ -125,8 +126,15 @@ object TerminalTabs {
     ) {
         val bg = backgroundHex?.let { parseHex(it) }
         ApplicationManager.getApplication().invokeAndWait {
-            val widget = TerminalToolWindowManager.getInstance(project)
-                .createLocalShellWidget(workingDir, tabName)
+            val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Terminal")
+                ?: return@invokeAndWait
+            val tabState = TerminalTabState().apply {
+                myTabName = tabName
+                myWorkingDirectory = workingDir
+            }
+            val terminalWidget = TerminalToolWindowManager.getInstance(project)
+                .createNewSession(null, tabState, toolWindow.contentManager)
+            val widget = ShellTerminalWidget.toShellJediTermWidgetOrThrow(terminalWidget)
             if (bg != null) recolorPanel(widget, bg)
             if (!command.isNullOrBlank()) widget.executeCommand(command)
             val content = findContentByName(project, tabName) ?: return@invokeAndWait
