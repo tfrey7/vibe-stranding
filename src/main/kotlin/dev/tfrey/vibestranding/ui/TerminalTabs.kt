@@ -10,6 +10,7 @@ import com.intellij.terminal.JBTerminalPanel
 import com.intellij.terminal.JBTerminalSystemSettingsProviderBase
 import com.intellij.terminal.TerminalColorPalette
 import com.intellij.ui.content.Content
+import com.jediterm.terminal.model.SelectionUtil
 import com.jediterm.terminal.ui.TerminalPanel
 import org.jetbrains.plugins.terminal.ShellTerminalWidget
 import org.jetbrains.plugins.terminal.TerminalTabState
@@ -302,6 +303,23 @@ object TerminalTabs {
         // user-data tag (pre-restart, pre-this-refactor).
         val parsed = parseSlug(content.displayName) ?: return null
         return knownStrands.firstOrNull { it == parsed }
+    }
+
+    /**
+     * EDT. Selected text in the currently-focused terminal tab's panel, or
+     * null when nothing is selected (or the focused tab isn't a classic
+     * JediTerm widget — e.g. the gen2 / reworked terminal). Reads `selection`
+     * + `terminalTextBuffer` off the [TerminalPanel] and reconstructs the
+     * string via JediTerm's [SelectionUtil].
+     */
+    fun focusedTerminalSelection(project: Project): String? {
+        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Terminal") ?: return null
+        val content = toolWindow.contentManager.selectedContent ?: return null
+        val widget = TerminalToolWindowManager.findWidgetByContent(content) ?: return null
+        val shell = ShellTerminalWidget.asShellJediTermWidget(widget) ?: return null
+        val panel = shell.terminalPanel
+        val selection = panel.selection ?: return null
+        return SelectionUtil.getSelectionText(selection, panel.terminalTextBuffer)
     }
 
     private fun findContentByName(project: Project, name: String): Content? {

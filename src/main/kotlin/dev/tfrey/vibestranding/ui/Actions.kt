@@ -8,6 +8,7 @@ import com.intellij.openapi.actionSystem.ActionGroup
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.logger
@@ -123,49 +124,110 @@ class NewStrandAction : AnAction() {
             null,
         )?.trim()?.takeIf { it.isNotEmpty() } ?: return
 
-        // Pick a slug + emoji synchronously from the description so the tab
-        // can open right away — claude haiku naming takes ~8-16s and would
-        // block the modal that long if we waited. The LLM-picked name and
-        // emoji slot in asynchronously after the tab is up (see
-        // [upgradeNameAsync]). The strand id is locked in at this point
-        // forever because git can't safely rename a worktree's dir + branch
-        // once a `claude` session is running in it.
-        val strand = StrandNamer.naiveSlug(description)
-        val emoji = fallbackEmoji(strand)
+        spawnStrandFromDescription(project, description)
+    }
+}
 
-        runInBackground(project, "Creating strand '$strand'…") {
-            val svc = service(project)
-            val background = pickStrandBackground(
-                svc.listStrands().mapNotNull { svc.metadata.read(it)?.background },
-            )
-            when (val result = svc.createStrand(strand)) {
-                is GitStrands.CreateResult.Ok -> {
-                    svc.metadata.write(strand, StrandMeta(emoji, description, background))
-                    TerminalTabs.openTerminalTab(
-                        project,
-                        result.path.toString(),
-                        tabLabel(emoji, strand),
-                        STRAND_COMMAND,
-                        strand,
-                        background,
-                    )
-                    if (result.linkIssues.isNotEmpty()) {
-                        onEdt {
-                            notify(
-                                project,
-                                "Symlink issues in '$strand':\n${result.linkIssues.joinToString("\n")}",
-                                NotificationType.WARNING,
-                            )
-                        }
+/**
+ * Single entry point for spawning a strand from a pre-resolved free-text
+ * description. Used by [NewStrandAction] (after its input dialog) and by
+ * [CreateStrandFromSelectionAction] (with the editor's selected text).
+ *
+ * Safe to call from EDT — bounces all git / IO work to a background task.
+ */
+internal fun spawnStrandFromDescription(project: Project, description: String) {
+    // Pick a slug + emoji synchronously from the description so the tab
+    // can open right away — claude haiku naming takes ~8-16s and would
+    // block the modal that long if we waited. The LLM-picked name and
+    // emoji slot in asynchronously after the tab is up (see
+    // [upgradeEmojiAsync]). The strand id is locked in at this point
+    // forever because git can't safely rename a worktree's dir + branch
+    // once a `claude` session is running in it.
+    val strand = StrandNamer.naiveSlug(description)
+    val emoji = fallbackEmoji(strand)
+
+    runInBackground(project, "Creating strand '$strand'…") {
+        val svc = service(project)
+        val background = pickStrandBackground(
+            svc.listStrands().mapNotNull { svc.metadata.read(it)?.background },
+        )
+        when (val result = svc.createStrand(strand)) {
+            is GitStrands.CreateResult.Ok -> {
+                svc.metadata.write(strand, StrandMeta(emoji, description, background))
+                TerminalTabs.openTerminalTab(
+                    project,
+                    result.path.toString(),
+                    tabLabel(emoji, strand),
+                    STRAND_COMMAND,
+                    strand,
+                    background,
+                )
+                if (result.linkIssues.isNotEmpty()) {
+                    onEdt {
+                        notify(
+                            project,
+                            "Symlink issues in '$strand':\n${result.linkIssues.joinToString("\n")}",
+                            NotificationType.WARNING,
+                        )
                     }
-                    upgradeEmojiAsync(project, svc, strand, description)
-                    project.getService(StrandDescriber::class.java).schedule(strand)
                 }
-                is GitStrands.CreateResult.Failed -> onEdt {
-                    notify(project, result.message, NotificationType.ERROR)
-                }
+                upgradeEmojiAsync(project, svc, strand, description)
+                project.getService(StrandDescriber::class.java).schedule(strand)
+            }
+            is GitStrands.CreateResult.Failed -> onEdt {
+                notify(project, result.message, NotificationType.ERROR)
             }
         }
+    }
+}
+
+// Wired into EditorPopupMenu + ConsoleEditorPopupMenu (right-click in a code
+// file or a Run/Debug console). Terminal selections route through
+// [CreateStrandFromTerminalSelectionAction] instead, because the terminal
+// tool window doesn't expose its right-click menu as a contributable group
+// in the classic engine, and the reworked "gen2" engine doesn't yet expose
+// an equivalent extension point at all.
+class CreateStrandFromSelectionAction : AnAction() {
+    override fun getActionUpdateThread() = ActionUpdateThread.BGT
+
+    override fun update(e: AnActionEvent) {
+        e.presentation.isEnabledAndVisible =
+            e.project != null &&
+            !selectedText(e).isNullOrBlank()
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        val description = selectedText(e)?.trim()?.takeIf { it.isNotEmpty() } ?: return
+        spawnStrandFromDescription(project, description)
+    }
+
+    private fun selectedText(e: AnActionEvent): String? = e.getData(CommonDataKeys.EDITOR)?.selectionModel?.selectedText
+}
+
+/**
+ * Sibling of [CreateStrandFromSelectionAction] for terminal tabs. Lives in
+ * the Vibe Stranding dropdown (Tools menu + Terminal toolbar) because the
+ * terminal tool window has no contributable right-click group. Always
+ * visible, grayed out when the focused terminal has no selection.
+ *
+ * Update is forced onto the EDT because [TerminalTabs.focusedTerminalSelection]
+ * reads live Swing/JediTerm component state, which BGT forbids.
+ */
+class CreateStrandFromTerminalSelectionAction : AnAction() {
+    override fun getActionUpdateThread() = ActionUpdateThread.EDT
+
+    override fun update(e: AnActionEvent) {
+        val project = e.project
+        e.presentation.isEnabled = project != null &&
+            !TerminalTabs.focusedTerminalSelection(project).isNullOrBlank()
+    }
+
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        val description = TerminalTabs.focusedTerminalSelection(project)
+            ?.trim()?.takeIf { it.isNotEmpty() } ?: return
+        spawnStrandFromDescription(project, description)
     }
 }
 
