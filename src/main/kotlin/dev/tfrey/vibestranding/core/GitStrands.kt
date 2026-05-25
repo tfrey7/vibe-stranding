@@ -9,11 +9,12 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import git4idea.config.GitExecutableManager
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 import org.jetbrains.ide.BuiltInServerManager
 import java.net.URLEncoder
 import java.nio.file.Files
@@ -291,31 +292,44 @@ class GitStrands(private val project: Project) {
             val busyCmd = "curl -sf -X POST '$baseUrl/busy?name=$encStrand&project=$encProject' >/dev/null 2>&1 || true"
             val idleCmd = "curl -sf -X POST '$baseUrl/idle?name=$encStrand&project=$encProject' >/dev/null 2>&1 || true"
 
-            val json = buildJsonObject {
-                putJsonObject("hooks") {
-                    putJsonArray("UserPromptSubmit") {
-                        addJsonObject {
-                            putJsonArray("hooks") {
-                                addJsonObject {
-                                    put("type", "command")
-                                    put("command", busyCmd)
-                                }
+            val hooksObject = buildJsonObject {
+                putJsonArray("UserPromptSubmit") {
+                    addJsonObject {
+                        putJsonArray("hooks") {
+                            addJsonObject {
+                                put("type", "command")
+                                put("command", busyCmd)
                             }
                         }
                     }
-                    putJsonArray("Stop") {
-                        addJsonObject {
-                            putJsonArray("hooks") {
-                                addJsonObject {
-                                    put("type", "command")
-                                    put("command", idleCmd)
-                                }
+                }
+                putJsonArray("Stop") {
+                    addJsonObject {
+                        putJsonArray("hooks") {
+                            addJsonObject {
+                                put("type", "command")
+                                put("command", idleCmd)
                             }
                         }
                     }
                 }
             }
-            val text = Json { prettyPrint = true }.encodeToString(JsonElement.serializer(), json) + "\n"
+
+            // Start from main's settings.local.json so the strand inherits
+            // MCP approvals (enabledMcpjsonServers), permissions, etc. without
+            // re-prompting. The plugin owns only the `hooks` key; everything
+            // else passes through. Re-runs on resume, so later additions to
+            // main propagate to existing strands automatically.
+            val mainSettings = mainCheckout().resolve(".claude").resolve("settings.local.json")
+            val baseObject: JsonObject = if (Files.exists(mainSettings)) {
+                runCatching {
+                    Json.parseToJsonElement(Files.readString(mainSettings)).jsonObject
+                }.getOrElse { JsonObject(emptyMap()) }
+            } else {
+                JsonObject(emptyMap())
+            }
+            val merged = JsonObject(baseObject.toMutableMap().apply { put("hooks", hooksObject) })
+            val text = Json { prettyPrint = true }.encodeToString(JsonElement.serializer(), merged) + "\n"
 
             val claudeDir = wt.resolve(".claude")
             Files.createDirectories(claudeDir)
