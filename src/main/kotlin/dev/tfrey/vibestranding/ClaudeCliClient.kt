@@ -3,6 +3,8 @@ package dev.tfrey.vibestranding
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.CapturingProcessHandler
 import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.util.SystemInfo
+import java.io.File
 import java.nio.file.Path
 
 private val LOG = logger<ClaudeCliClientMarker>()
@@ -43,6 +45,11 @@ object ClaudeCliClient : AgenticLmClient {
             .withParameters(params)
             .withCharset(Charsets.UTF_8)
             .withParentEnvironmentType(GeneralCommandLine.ParentEnvironmentType.CONSOLE)
+            // Redirect stdin from the platform's null device. Without this,
+            // `claude -p` waits 3s for stdin (looking for a piped prompt
+            // alongside the -p flag), then prints a warning to stderr that
+            // would otherwise contaminate the captured output.
+            .withInput(File(if (SystemInfo.isWindows) "NUL" else "/dev/null"))
         if (worktree != null) cmd.withWorkDirectory(worktree.toFile())
 
         return try {
@@ -58,7 +65,9 @@ object ClaudeCliClient : AgenticLmClient {
                     LmResult.Error("claude exited with code ${out.exitCode}:\n\n$combined")
                 }
                 else -> {
-                    val text = (out.stdout + out.stderr).trim()
+                    // Use stdout only on success — stderr carries warnings /
+                    // progress that would corrupt the model's text answer.
+                    val text = out.stdout.trim()
                     if (text.isEmpty()) LmResult.Error("claude returned no output") else LmResult.Ok(text)
                 }
             }
