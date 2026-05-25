@@ -5,11 +5,21 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.project.Project
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * Project-level persistent settings for Vibe Stranding. Stored in the
  * project's `.idea/vibe-stranding.xml` so per-project overrides are possible
  * (e.g. on for the main coding repo, off for a sandbox).
+ *
+ * Settings are exposed for read/write over the plugin's MCP / REST surface
+ * via [FIELDS] — adding a new field to [State] plus one entry there is enough
+ * to make it remotely controllable. The Settings-UI Configurable still binds
+ * to the `var` accessors directly.
  */
 @Service(Service.Level.PROJECT)
 @State(name = "VibeStranding", storages = [Storage("vibe-stranding.xml")])
@@ -31,7 +41,61 @@ class VibeStrandingSettings : PersistentStateComponent<VibeStrandingSettings.Sta
             state = state.copy(resumeStrandsOnStartup = value)
         }
 
+    /** JSON object keyed by [FIELDS] entry names, matching the MCP `settings` tool response shape. */
+    fun snapshot(): JsonObject = buildJsonObject {
+        FIELDS.forEach { put(it.name, it.read(this@VibeStrandingSettings)) }
+    }
+
+    /**
+     * Validate every key in [updates] first; apply nothing if any fail. Keeps
+     * partial-update weirdness out of the persistent state when an MCP caller
+     * passes a typo'd key or a bad value.
+     */
+    fun applyUpdates(updates: Map<String, String>): List<String> {
+        val errors = mutableListOf<String>()
+        val staged = mutableListOf<() -> Unit>()
+        for ((key, raw) in updates) {
+            val field = FIELDS.firstOrNull { it.name == key }
+            if (field == null) {
+                errors += "$key: unknown setting"
+                continue
+            }
+            val apply = field.stageFromString(this, raw)
+            if (apply == null) {
+                errors += "$key: expected ${field.jsonType}, got '$raw'"
+            } else {
+                staged += apply
+            }
+        }
+        if (errors.isEmpty()) staged.forEach { it() }
+        return errors
+    }
+
+    class Field(
+        val name: String,
+        val jsonType: String,
+        val description: String,
+        val read: (VibeStrandingSettings) -> JsonElement,
+        // null = raw value won't coerce; otherwise a deferred apply so the
+        // caller can validate-all-then-apply-all.
+        val stageFromString: (VibeStrandingSettings, String) -> (() -> Unit)?,
+    )
+
     companion object {
         fun get(project: Project): VibeStrandingSettings = project.getService(VibeStrandingSettings::class.java)
+
+        /** Add an entry here to expose a new setting over MCP/REST. */
+        val FIELDS: List<Field> = listOf(
+            Field(
+                name = "resumeStrandsOnStartup",
+                jsonType = "boolean",
+                description = "If true, every strand whose worktree still exists is auto-resumed when " +
+                    "this project opens — its terminal tab is restored running `claude --continue`. Default true.",
+                read = { JsonPrimitive(it.resumeStrandsOnStartup) },
+                stageFromString = { settings, raw ->
+                    raw.toBooleanStrictOrNull()?.let { value -> { settings.resumeStrandsOnStartup = value } }
+                },
+            ),
+        )
     }
 }

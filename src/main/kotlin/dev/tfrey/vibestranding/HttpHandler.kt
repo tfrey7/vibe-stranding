@@ -47,6 +47,8 @@ import org.jetbrains.ide.HttpRequestHandler
  *   POST     /api/vibe-stranding/delete?name=<kebab>[&force=true]
  *   POST     /api/vibe-stranding/busy?name=<kebab>      (hook: Claude turn started)
  *   POST     /api/vibe-stranding/idle?name=<kebab>      (hook: Claude turn ended)
+ *   GET|POST /api/vibe-stranding/settings              (JSON object — current settings)
+ *   POST     /api/vibe-stranding/settings?<key>=<val>… (apply updates atomically, return new JSON)
  *
  *   --- MCP (JSON-RPC over HTTP, for Claude Code) ---
  *
@@ -99,6 +101,7 @@ class HttpHandler : HttpRequestHandler() {
             "get" -> doGet(project, params)
             "busy" -> doSetBusy(project, params, busy = true)
             "idle" -> doSetBusy(project, params, busy = false)
+            "settings" -> doSettings(project, params)
             else -> OpResult(HttpResponseStatus.NOT_FOUND, "Unknown endpoint: $endpoint")
         }
         val contentType = if (result.isJson) "application/json; charset=utf-8" else "text/plain; charset=utf-8"
@@ -285,6 +288,27 @@ class HttpHandler : HttpRequestHandler() {
         return OpResult(HttpResponseStatus.OK, if (busy) "busy" else "idle")
     }
 
+    /**
+     * Read with no setting args, or atomically update any subset of
+     * [VibeStrandingSettings.FIELDS] keys and return the new state. The
+     * `project` param is filtered out so it isn't treated as a setting.
+     */
+    private fun doSettings(project: Project, params: Map<String, String>): OpResult {
+        val settings = VibeStrandingSettings.get(project)
+        val updates = params.filterKeys { it != "project" }
+        if (updates.isNotEmpty()) {
+            val errors = settings.applyUpdates(updates)
+            if (errors.isNotEmpty()) {
+                return OpResult(HttpResponseStatus.BAD_REQUEST, errors.joinToString("\n"))
+            }
+        }
+        return OpResult(
+            HttpResponseStatus.OK,
+            JSON.encodeToString(JsonElement.serializer(), settings.snapshot()),
+            isJson = true,
+        )
+    }
+
     private fun doGet(project: Project, params: Map<String, String>): OpResult {
         val strand = requireStrandName(params)
             ?: return OpResult(HttpResponseStatus.BAD_REQUEST, "Missing or invalid 'name'.")
@@ -381,6 +405,7 @@ class HttpHandler : HttpRequestHandler() {
                 add(TOOL_DELETE_STRAND)
                 add(TOOL_LIST_STRANDS)
                 add(TOOL_GET_STRAND)
+                add(TOOL_SETTINGS)
             }
         }
         "tools/call" -> callTool(params)
@@ -409,6 +434,7 @@ class HttpHandler : HttpRequestHandler() {
             "delete_strand" -> doDelete(project, argMap)
             "list_strands" -> doList(project)
             "get_strand" -> doGet(project, argMap)
+            "settings" -> doSettings(project, argMap)
             else -> return toolError("Unknown tool: $toolName")
         }
         return toolResult(result.text, isError = !result.isOk)
@@ -651,6 +677,43 @@ class HttpHandler : HttpRequestHandler() {
             putJsonObject("inputSchema") {
                 put("type", "object")
                 putJsonObject("properties") {
+                    putJsonObject("project") {
+                        put("type", "string")
+                        put("description", "Project name or basePath; needed only when multiple IDE windows are open.")
+                    }
+                }
+            }
+        }
+
+        private val TOOL_SETTINGS = buildJsonObject {
+            put("name", "settings")
+            put(
+                "description",
+                buildString {
+                    append(
+                        "Read or update this project's Vibe Stranding plugin settings. " +
+                            "Call with no setting arguments to read the current values. " +
+                            "Pass any subset of the setting names below as arguments to update them — " +
+                            "only the keys you pass are changed, and an invalid key or value rejects " +
+                            "the whole call without mutating anything. Returns the (possibly updated) " +
+                            "settings as JSON.\n\nSettings:",
+                    )
+                    VibeStrandingSettings.FIELDS.forEach {
+                        append(
+                            "\n- ",
+                        ).append(it.name).append(" (").append(it.jsonType).append("): ").append(it.description)
+                    }
+                },
+            )
+            putJsonObject("inputSchema") {
+                put("type", "object")
+                putJsonObject("properties") {
+                    VibeStrandingSettings.FIELDS.forEach { field ->
+                        putJsonObject(field.name) {
+                            put("type", field.jsonType)
+                            put("description", field.description)
+                        }
+                    }
                     putJsonObject("project") {
                         put("type", "string")
                         put("description", "Project name or basePath; needed only when multiple IDE windows are open.")
