@@ -15,12 +15,16 @@ a bug fix" → patch), run this flow end-to-end:
    truth — `plugin.xml` inherits it). Semver: patch = `0.1.0 → 0.1.1`,
    minor = `0.1.0 → 0.2.0`, major = `0.1.0 → 1.0.0`.
 3. **Add a `CHANGELOG.md` section** at the top (under `# Changelog`) for the
-   new version: `## X.Y.Z — YYYY-MM-DD` followed by terse prose describing
-   what changed. This is the single source of truth — Gradle reads it into
-   the bundled `plugin.xml`'s `<change-notes>`, and step 7 hands it to
+   new version: `## X.Y.Z — YYYY-MM-DD` followed by an HTML
+   `<ul><li>…</li></ul>` list — one bullet per atomic change, terse but
+   self-contained. This is the single source of truth — Gradle reads it
+   into the bundled `plugin.xml`'s `<change-notes>`, and step 7 hands it to
    `gh release create`, which the GH Pages workflow then forwards into
-   `updatePlugins.xml`. IntelliJ renders a subset of HTML, not markdown, so
-   keep entries as sentences (no `-`/`*` bullets).
+   `updatePlugins.xml`. IntelliJ's change-notes view renders a subset of
+   HTML, not markdown, so use `<ul>`/`<li>` rather than `-`/`*` bullets;
+   inline `<code>` and `<em>` are fine. GitHub release notes and
+   `updatePlugins.xml` render the same HTML, so one format covers all
+   three destinations.
 4. **Commit the bump + changelog together** with message `Publish X.Y.Z`
    (matches the vocab in `~/.claude/general/workflow.md`).
 5. **Tag annotated** — `git tag -a vX.Y.Z -m "X.Y.Z"`. Lightweight tags
