@@ -23,8 +23,10 @@ import dev.tfrey.vibestranding.core.RESUME_COMMAND
 import dev.tfrey.vibestranding.core.STRAND_COMMAND
 import dev.tfrey.vibestranding.core.SUMMARIZE_PROMPT
 import dev.tfrey.vibestranding.core.StrandDescriber
+import dev.tfrey.vibestranding.core.StrandHandoff
 import dev.tfrey.vibestranding.core.StrandMeta
 import dev.tfrey.vibestranding.core.StrandNamer
+import dev.tfrey.vibestranding.core.StrandWorktree
 import dev.tfrey.vibestranding.core.fallbackEmoji
 import dev.tfrey.vibestranding.core.pickStrandBackground
 import dev.tfrey.vibestranding.core.tabLabel
@@ -203,6 +205,11 @@ private fun upgradeEmojiAsync(project: Project, svc: GitStrands, strand: String,
  * (`getChildren` runs at popup time) and renders nothing when no strands
  * exist — IntelliJ hides empty groups, so the labeled "Resume" separator
  * also disappears.
+ *
+ * When this project's basePath IS a strand worktree (i.e. the window was
+ * opened via View This Strand's Code), the worktree-self also appears as a
+ * resume entry — `GitStrands.listStrands()` wouldn't find it because its
+ * path math assumes the project IS the main checkout.
  */
 class ResumeStrandsGroup : ActionGroup() {
     init {
@@ -219,15 +226,22 @@ class ResumeStrandsGroup : ActionGroup() {
         // "currently being worked on", and the menu would otherwise list a
         // resume entry that just re-focuses an already-visible tab.
         val open = TerminalTabs.openStrandsFor(project)
-        val strands = svc.listStrands().filter { it !in open }
-        if (strands.isEmpty()) return emptyArray()
+        val siblings = svc.listStrands().filter { it !in open }
+        val selfCtx = StrandWorktree.detect(project)?.takeIf { it.strand !in open }
+        if (siblings.isEmpty() && selfCtx == null) return emptyArray()
         return buildList<AnAction> {
             add(Separator.create("Resume"))
-            strands.forEach { strand ->
+            siblings.forEach { strand ->
                 val meta = svc.metadata.read(strand)
                 val emoji = meta?.emoji ?: fallbackEmoji(strand)
                 val shortDescription = meta?.generatedDescription ?: meta?.description
                 add(ResumeOneStrandAction(strand, emoji, shortDescription))
+            }
+            if (selfCtx != null) {
+                val meta = selfCtx.readMeta()
+                val emoji = meta?.emoji ?: fallbackEmoji(selfCtx.strand)
+                val shortDescription = meta?.generatedDescription ?: meta?.description
+                add(ResumeSelfStrandAction(selfCtx.strand, emoji, shortDescription, meta?.background))
             }
         }.toTypedArray()
     }
@@ -240,6 +254,34 @@ private class ResumeOneStrandAction(private val strand: String, emoji: String, d
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         resumeStrand(project, service(project), strand)
+    }
+}
+
+/**
+ * Resume entry for the strand whose worktree IS the current project. Path
+ * math in [GitStrands] doesn't apply (the project's basePath already IS the
+ * worktree), so the tab opens directly at `project.basePath`; self-heal
+ * (symlinks, busy hooks) is skipped since the originating main-checkout
+ * window wired those at create time.
+ */
+private class ResumeSelfStrandAction(
+    private val strand: String,
+    private val emoji: String,
+    description: String?,
+    private val background: String?,
+) : AnAction(buildResumeLabel(emoji, strand, description)) {
+    override fun actionPerformed(e: AnActionEvent) {
+        val project = e.project ?: return
+        if (TerminalTabs.focusTabForStrand(project, strand)) return
+        val basePath = project.basePath ?: return
+        TerminalTabs.openTerminalTab(
+            project,
+            basePath,
+            tabLabel(emoji, strand),
+            RESUME_COMMAND,
+            strand,
+            background,
+        )
     }
 }
 
@@ -286,21 +328,35 @@ internal fun resumeStrand(project: Project, svc: GitStrands, strand: String) {
     }
 }
 
-/** Opens the focused tab's strand worktree as a project in a new IDE window. */
+/**
+ * Opens the focused tab's strand worktree as a project in a new IDE window,
+ * moving the strand's `claude` session from the main window into the new one:
+ * the main-window terminal tab is closed, and a `claude --continue` tab is
+ * spawned in the new window via [StrandHandoff].
+ *
+ * Disabled while the strand's Claude turn is in flight (the busy animation
+ * is running) — closing the tab mid-turn would lose the in-progress reply.
+ */
 class ViewThisStrandsCodeAction : AnAction() {
     override fun update(e: AnActionEvent) {
         val project = e.project
-        e.presentation.isEnabled = project != null && focusedStrand(project) != null
+        val strand = project?.let { focusedStrand(it) }
+        e.presentation.isEnabled = strand != null && !TerminalTabs.isBusy(project, strand)
     }
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val strand = focusedStrand(project) ?: return
-        val path = service(project).strandPath(strand)
+        val svc = service(project)
+        val path = svc.strandPath(strand)
         if (!path.exists()) {
             notify(project, "Strand path missing: $path", NotificationType.ERROR)
             return
         }
+        val meta = svc.metadata.read(strand)
+        val emoji = meta?.emoji ?: fallbackEmoji(strand)
+        StrandHandoff.stash(path.toString(), StrandHandoff.Pending(strand, emoji, meta?.background))
+        TerminalTabs.closeTabForStrand(project, strand)
         ProjectUtil.openOrImport(path, OpenProjectTask { forceOpenInNewFrame = true })
     }
 }

@@ -224,6 +224,17 @@ object TerminalTabs {
         }
     }
 
+    /**
+     * True while the strand's tab is animating the "Claude is working" frames,
+     * i.e. between the strand's UserPromptSubmit and Stop hooks. Safe to call
+     * from any thread; `animations` is only mutated on the EDT, so the read may
+     * be stale by a frame but is good enough to gate menu enablement.
+     */
+    fun isBusy(project: Project, strand: String): Boolean {
+        val content = findContentForStrand(project, strand) ?: return false
+        return animations.containsKey(content)
+    }
+
     private fun startAnimation(content: Content) {
         if (animations.containsKey(content)) return
         val baseLabel = content.displayName
