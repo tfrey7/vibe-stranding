@@ -13,6 +13,13 @@ change-notes view renders a subset of HTML, not markdown, so use
 are fine. GitHub release notes and `updatePlugins.xml` render the same
 HTML, so one format works for all three destinations.
 
+## 0.6.1 — 2026-05-25
+
+<ul>
+<li>New strands no longer wipe out the MCP-server approvals from <code>.claude/settings.local.json</code> in the main checkout. The plugin used to write a fresh file containing only its own busy/idle hooks, forcing re-approval of every MCP server on every new strand; it now reads main's file as the base, overlays the plugin-owned <code>hooks</code> key, and writes the merged result. Existing strands self-heal on Resume Strand.</li>
+<li>Switched off the <code>createLocalShellWidget</code> terminal API, which is <code>forRemoval</code> in IDEA 2026.1. The plugin now opens strand tabs through <code>TerminalToolWindowManager.createNewSession</code>, the closest non-deprecated public entry point.</li>
+</ul>
+
 ## 0.6.0 — 2026-05-25
 
 <ul>
