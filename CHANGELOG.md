@@ -10,9 +10,17 @@ Each release should add a new section at the top. Keep entries terse
 prose — IntelliJ's change-notes view renders a subset of HTML, not
 markdown, so bullet syntax won't render; use sentences.
 
-## Unreleased
+## 0.6.0 — 2026-05-25
 
-When a project opens, every existing strand now gets its terminal tab restored automatically, running <code>claude --continue</code> so each worktree's claude session picks up where it left off. The behavior is on by default and can be toggled at Settings → Tools → Vibe Stranding.
+A few minutes after a strand is created, the configured LLM now generates a one-sentence summary of what the strand is about, grounded in its git log and diff against main. The blurb appears in the Resume Strand dropdown next to the emoji, and rides along on the <code>get_strand</code> / <code>list_strands</code> MCP responses as <code>generated_description</code>. The delay defaults to 5 minutes and is configurable at Settings → Tools → Vibe Stranding; strands with an empty diff at the timer fire reschedule rather than summarize nothing.
+
+When a project opens, every existing strand now gets its terminal tab restored automatically, running <code>claude --continue</code> so each worktree's claude session picks up where it left off. The behavior is on by default and can be toggled at Settings → Tools → Vibe Stranding. The Resume Strand dropdown also hides strands that already own an open tab, since selecting them just refocused the visible tab.
+
+Plugin settings are now reachable from outside the IDE: a new <code>settings</code> MCP tool (and matching REST endpoint) reads the whole config with no args, or atomically updates any subset of keys. The schema is generated from the same field list the Settings UI uses, so new options show up in both places automatically.
+
+The mid-turn busy animation now replaces the strand emoji on the left of the tab rather than trailing on the right, so the tab reads like the Claude CLI prompt. The IDE's project picker entry <em>Open Strand</em> is renamed to <em>View This Strand's Code</em> to match what it actually does. Stray "no stdin data received" warnings from <code>claude -p</code> no longer leak into LLM output.
+
+
 
 ## 0.5.1 — 2026-05-24
 
