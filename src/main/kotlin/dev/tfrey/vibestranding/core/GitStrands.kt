@@ -45,6 +45,15 @@ class GitStrands(private val project: Project) {
         // Listed once so the symlink and the info/exclude entries stay in sync.
         private val PLUGIN_MANAGED_PATHS = listOf("node_modules", ".env")
 
+        // Mirrors `claude --worktree`: a gitignore-syntax list of additional
+        // files to copy into each new strand from the main checkout.
+        private const val WORKTREE_INCLUDE_FILE = ".worktreeinclude"
+
+        // Fallback patterns used when no .worktreeinclude exists. Covers the
+        // env-file family most strand sessions need to boot; bare `.env` is
+        // already handled by [PLUGIN_MANAGED_PATHS] as a symlink.
+        private val DEFAULT_WORKTREE_INCLUDES = listOf(".env.*", ".envrc")
+
         // Sidecar filename for per-strand metadata. Lives inside the strand's
         // per-worktree gitdir, resolved via `git rev-parse --git-path`.
         private const val SIDECAR_FILE = "vibe-stranding.json"
@@ -168,6 +177,10 @@ class GitStrands(private val project: Project) {
         addToInfoExclude(wt, PLUGIN_MANAGED_PATHS)
         val linksMs = System.currentTimeMillis() - linksStart
 
+        val includesStart = System.currentTimeMillis()
+        issues += applyWorktreeIncludes(wt)
+        val includesMs = System.currentTimeMillis() - includesStart
+
         // Must run before the terminal launches `claude` — Claude only reads
         // hooks at startup, so a post-launch install would miss the first turn.
         val hooksStart = System.currentTimeMillis()
@@ -180,7 +193,8 @@ class GitStrands(private val project: Project) {
 
         LOG.info(
             "createStrand '$strand': defaultBranch=${branchMs}ms, worktreeAdd=${addMs}ms, " +
-                "linksAndExclude=${linksMs}ms, claudeHooks=${hooksMs}ms, refresh=${refreshMs}ms",
+                "linksAndExclude=${linksMs}ms, worktreeIncludes=${includesMs}ms, " +
+                "claudeHooks=${hooksMs}ms, refresh=${refreshMs}ms",
         )
         return CreateResult.Ok(wt, issues)
     }
@@ -196,6 +210,61 @@ class GitStrands(private val project: Project) {
         val wt = strandPath(strand)
         if (!wt.exists()) return listOf("Strand path missing: $wt")
         return ensureManagedLinks(wt)
+    }
+
+    /**
+     * Idempotent: copy gitignored files matching `.worktreeinclude` (or the
+     * built-in [DEFAULT_WORKTREE_INCLUDES] when no project file is present)
+     * from the main checkout into the strand. Mirrors `claude --worktree`'s
+     * `.worktreeinclude` so users who already maintain one in their repo get
+     * the same behavior from strands. Existing destination files are never
+     * overwritten — strand-local edits survive resume, and the symlinks from
+     * [ensureManagedLinks] take precedence for [PLUGIN_MANAGED_PATHS].
+     */
+    fun copyWorktreeIncludes(strand: String): List<String> {
+        val wt = strandPath(strand)
+        if (!wt.exists()) return listOf("Strand path missing: $wt")
+        return applyWorktreeIncludes(wt)
+    }
+
+    private fun applyWorktreeIncludes(wt: Path): List<String> {
+        val main = mainCheckout()
+        val includeFile = main.resolve(WORKTREE_INCLUDE_FILE)
+
+        // Delegate gitignore-pattern matching to git itself. `--others` keeps
+        // tracked files out of the copy set; without `--exclude-standard`,
+        // the only ignore sources are the patterns we pass, so `--ignored`
+        // means "matches one of our patterns". `-z` keeps paths with spaces
+        // or other oddities intact.
+        val source: String
+        val patternArgs: List<String>
+        if (Files.exists(includeFile)) {
+            source = WORKTREE_INCLUDE_FILE
+            patternArgs = listOf("--exclude-from=$includeFile")
+        } else {
+            source = "built-in worktree includes"
+            patternArgs = DEFAULT_WORKTREE_INCLUDES.map { "--exclude=$it" }
+        }
+        val list = git(main, "ls-files", "-z", "--others", "--ignored", *patternArgs.toTypedArray())
+        if (!list.ok) {
+            LOG.warn("git ls-files for $source failed: ${list.stderr}")
+            return listOf("$source: ${list.stderr}")
+        }
+
+        val issues = mutableListOf<String>()
+        list.stdout.split('\u0000').filter { it.isNotEmpty() }.forEach { rel ->
+            val source = main.resolve(rel)
+            val dest = wt.resolve(rel)
+            if (Files.exists(dest, LinkOption.NOFOLLOW_LINKS)) return@forEach
+            try {
+                Files.createDirectories(dest.parent)
+                Files.copy(source, dest)
+            } catch (t: Throwable) {
+                LOG.warn("Could not copy $rel from main into strand", t)
+                issues.add("$rel: ${t.message ?: t::class.simpleName}")
+            }
+        }
+        return issues
     }
 
     private fun ensureManagedLinks(wt: Path): List<String> {

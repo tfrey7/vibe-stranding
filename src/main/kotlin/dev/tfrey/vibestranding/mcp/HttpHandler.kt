@@ -211,6 +211,7 @@ class HttpHandler : HttpRequestHandler() {
         // feature, or the IDE's built-in HTTP port may have changed since
         // last create.
         val issues = svc.ensureLinks(strand).toMutableList()
+        issues += svc.copyWorktreeIncludes(strand)
         issues += svc.ensureClaudeHooks(strand)
         val meta = svc.metadata.read(strand)
         val emoji = meta?.emoji ?: fallbackEmoji(strand)

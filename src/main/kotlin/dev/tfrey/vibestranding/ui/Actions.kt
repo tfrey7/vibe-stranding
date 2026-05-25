@@ -299,6 +299,7 @@ internal fun resumeStrand(project: Project, svc: GitStrands, strand: String) {
     // but the busy-hook install made the broader resume EDT-unsafe.
     runInBackground(project, "Resuming '$strand'") {
         val issues = svc.ensureLinks(strand).toMutableList()
+        issues += svc.copyWorktreeIncludes(strand)
         issues += svc.ensureClaudeHooks(strand)
         val meta = svc.metadata.read(strand)
         val emoji = meta?.emoji ?: fallbackEmoji(strand)
