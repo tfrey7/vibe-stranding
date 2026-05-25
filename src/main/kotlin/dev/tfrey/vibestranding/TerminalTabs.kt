@@ -240,6 +240,20 @@ object TerminalTabs {
         if (content.manager != null) content.displayName = state.baseLabel
     }
 
+    /**
+     * Strand ids that currently own an open terminal tab. Used by the Resume
+     * dropdown to hide strands already being worked on, so the menu only shows
+     * strands the user could actually resume. Mirrors [findContentForStrand]'s
+     * matching: primary lookup by [STRAND_KEY] user-data, with the legacy
+     * slug-from-displayName fallback for tabs that predate the user-data tag.
+     */
+    fun openStrandsFor(project: Project): Set<String> {
+        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Terminal") ?: return emptySet()
+        return toolWindow.contentManager.contents.mapNotNullTo(mutableSetOf()) { content ->
+            content.getUserData(STRAND_KEY) ?: parseSlug(content.displayName)
+        }
+    }
+
     /** EDT. Focus the strand's tab; returns true if a tab was activated. */
     fun focusTabForStrand(project: Project, strand: String): Boolean {
         val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("Terminal") ?: return false

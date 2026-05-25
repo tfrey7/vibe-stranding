@@ -283,7 +283,11 @@ class ResumeStrandsGroup : ActionGroup() {
     override fun getChildren(e: AnActionEvent?): Array<AnAction> {
         val project = e?.project ?: return emptyArray()
         val svc = service(project)
-        val strands = svc.listStrands()
+        // Hide strands that already have an open terminal tab — those are
+        // "currently being worked on", and the menu would otherwise list a
+        // resume entry that just re-focuses an already-visible tab.
+        val open = TerminalTabs.openStrandsFor(project)
+        val strands = svc.listStrands().filter { it !in open }
         if (strands.isEmpty()) return emptyArray()
         return buildList<AnAction> {
             add(Separator.create("Resume"))
