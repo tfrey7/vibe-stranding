@@ -21,8 +21,19 @@ import java.nio.file.Path
  *    tab header via `Content.setTabColor`. Picked at create time by
  *    rotating through a fixed palette so siblings visually differ; persisted
  *    so resuming restores the same color.
+ *  - [generatedDescription] is a one-sentence headline produced by a
+ *    background `claude -p` call a few minutes after creation, once the
+ *    strand has accumulated enough committed / uncommitted change to be
+ *    summarizable. Null until that job lands. Distinct from [description]
+ *    because the user's create-time prompt is preserved as input context
+ *    even after the generated blurb supersedes it for display.
  */
-data class StrandMeta(val emoji: String, val description: String? = null, val background: String? = null)
+data class StrandMeta(
+    val emoji: String,
+    val description: String? = null,
+    val background: String? = null,
+    val generatedDescription: String? = null,
+)
 
 /**
  * Backend-agnostic storage for [StrandMeta]. All plugin code reads/writes
@@ -62,7 +73,8 @@ class WorktreeSidecarStore(private val sidecarPath: (strand: String) -> Path?) :
             val emoji = obj["emoji"]?.jsonPrimitive?.contentOrNull ?: return null
             val description = obj["description"]?.jsonPrimitive?.contentOrNull
             val background = obj["background"]?.jsonPrimitive?.contentOrNull
-            StrandMeta(emoji, description, background)
+            val generatedDescription = obj["generatedDescription"]?.jsonPrimitive?.contentOrNull
+            StrandMeta(emoji, description, background, generatedDescription)
         } catch (t: Throwable) {
             LOG.warn("Could not parse strand metadata at $path", t)
             null
@@ -77,6 +89,7 @@ class WorktreeSidecarStore(private val sidecarPath: (strand: String) -> Path?) :
                 put("emoji", meta.emoji)
                 if (meta.description != null) put("description", meta.description)
                 if (meta.background != null) put("background", meta.background)
+                if (meta.generatedDescription != null) put("generatedDescription", meta.generatedDescription)
             },
         )
         try {

@@ -22,6 +22,7 @@
                     icon="/icons/vibe-stranding.svg"
                     factoryClass="dev.tfrey.vibestranding.StrandSummaryToolWindowFactory"/>
         <postStartupActivity implementation="dev.tfrey.vibestranding.ResumeAllStrandsActivity"/>
+        <postStartupActivity implementation="dev.tfrey.vibestranding.StrandDescriberStartupActivity"/>
         <projectConfigurable id="dev.tfrey.vibestranding.settings"
                              parentId="tools"
                              displayName="Vibe Stranding"

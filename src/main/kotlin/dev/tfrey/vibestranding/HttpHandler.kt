@@ -158,6 +158,7 @@ class HttpHandler : HttpRequestHandler() {
                     strand,
                     StrandMeta(emoji, description.takeIf { it.isNotEmpty() }, background),
                 )
+                project.getService(StrandDescriber::class.java).schedule(strand)
                 TerminalTabs.openTerminalTab(
                     project,
                     r.path.toString(),
@@ -324,6 +325,7 @@ class HttpHandler : HttpRequestHandler() {
         put("name", name)
         put("emoji", meta?.emoji?.let(::JsonPrimitive) ?: JsonNull)
         put("description", meta?.description?.let(::JsonPrimitive) ?: JsonNull)
+        put("generated_description", meta?.generatedDescription?.let(::JsonPrimitive) ?: JsonNull)
         put("color", meta?.background?.let(::JsonPrimitive) ?: JsonNull)
     }
 
@@ -669,10 +671,14 @@ class HttpHandler : HttpRequestHandler() {
             put(
                 "description",
                 "List the currently active strands. Returns a JSON array of objects with " +
-                    "`name` (kebab slug), `emoji`, `description` (free-text summary), and `color` " +
-                    "(hex like `#4E78A0`). `emoji` / `description` / `color` may be null for strands " +
-                    "created without metadata. Use to disambiguate when the user refers to a strand " +
-                    "without its exact slug, or to confirm what's in flight.",
+                    "`name` (kebab slug), `emoji`, `description` (the user's create-time prompt), " +
+                    "`generated_description` (a one-sentence blurb produced by a background LM call " +
+                    "a few minutes after creation; may be null while still pending or if generation " +
+                    "failed), and `color` (hex like `#4E78A0`). Prefer `generated_description` over " +
+                    "`description` when both are present — it reflects what the strand actually " +
+                    "turned out to be about. Any field may be null for strands created without " +
+                    "metadata. Use to disambiguate when the user refers to a strand without its " +
+                    "exact slug, or to confirm what's in flight.",
             )
             putJsonObject("inputSchema") {
                 put("type", "object")
@@ -727,9 +733,11 @@ class HttpHandler : HttpRequestHandler() {
             put(
                 "description",
                 "Fetch metadata for one strand: returns a JSON object with `name`, `emoji`, " +
-                    "`description`, and `color` (same shape as a single entry from `list_strands`). " +
-                    "Use when the user asks about a specific strand's color, emoji, or summary, " +
-                    "or when you need richer context than the slug alone.",
+                    "`description` (create-time prompt), `generated_description` (background-" +
+                    "generated one-liner; may be null), and `color` (same shape as a single entry " +
+                    "from `list_strands`). Prefer `generated_description` over `description` when " +
+                    "both are present. Use when the user asks what a strand is about, or when you " +
+                    "need richer context than the slug alone.",
             )
             putJsonObject("inputSchema") {
                 put("type", "object")

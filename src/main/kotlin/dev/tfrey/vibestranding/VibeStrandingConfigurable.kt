@@ -3,12 +3,13 @@ package dev.tfrey.vibestranding
 import com.intellij.openapi.options.BoundConfigurable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogPanel
+import com.intellij.ui.dsl.builder.bindIntText
 import com.intellij.ui.dsl.builder.bindSelected
+import com.intellij.ui.dsl.builder.columns
 import com.intellij.ui.dsl.builder.panel
 
 /**
- * Settings → Tools → Vibe Stranding. A single checkbox today; gives us a
- * landing spot for future per-project toggles without re-doing the wiring.
+ * Settings → Tools → Vibe Stranding. Landing spot for per-project toggles.
  */
 class VibeStrandingConfigurable(private val project: Project) : BoundConfigurable("Vibe Stranding") {
     override fun createPanel(): DialogPanel {
@@ -22,6 +23,17 @@ class VibeStrandingConfigurable(private val project: Project) : BoundConfigurabl
                     )
                     .bindSelected(settings::resumeStrandsOnStartup)
             }
+            row("Generate strand description after:") {
+                intTextField(range = 1..1440)
+                    .columns(4)
+                    .bindIntText(settings::descriptionDelayMinutes)
+                @Suppress("DialogTitleCapitalization")
+                label("minutes")
+            }.rowComment(
+                "How long to wait after a strand is created before asking the LM to write a " +
+                    "one-sentence description of what it's about. Strands with no diff at that " +
+                    "point reschedule for the same interval.",
+            )
         }
     }
 }

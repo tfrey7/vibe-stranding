@@ -217,6 +217,7 @@ class NewStrandAction : AnAction() {
                         }
                     }
                     upgradeEmojiAsync(project, svc, strand, description)
+                    project.getService(StrandDescriber::class.java).schedule(strand)
                 }
                 is GitStrands.CreateResult.Failed -> onEdt {
                     notify(project, result.message, NotificationType.ERROR)
@@ -278,18 +279,34 @@ class ResumeStrandsGroup : ActionGroup() {
         return buildList<AnAction> {
             add(Separator.create("Resume"))
             strands.forEach { strand ->
-                val emoji = svc.metadata.read(strand)?.emoji ?: fallbackEmoji(strand)
-                add(ResumeOneStrandAction(strand, emoji))
+                val meta = svc.metadata.read(strand)
+                val emoji = meta?.emoji ?: fallbackEmoji(strand)
+                val shortDescription = meta?.generatedDescription ?: meta?.description
+                add(ResumeOneStrandAction(strand, emoji, shortDescription))
             }
         }.toTypedArray()
     }
 }
 
-private class ResumeOneStrandAction(private val strand: String, emoji: String) : AnAction("$emoji $strand") {
+private const val RESUME_LABEL_DESCRIPTION_MAX = 50
+
+private class ResumeOneStrandAction(private val strand: String, emoji: String, description: String?) :
+    AnAction(buildResumeLabel(emoji, strand, description)) {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         resumeStrand(project, service(project), strand)
     }
+}
+
+private fun buildResumeLabel(emoji: String, strand: String, description: String?): String {
+    val collapsed = description?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
+    if (collapsed.isEmpty()) return "$emoji $strand"
+    val trimmed = if (collapsed.length > RESUME_LABEL_DESCRIPTION_MAX) {
+        collapsed.take(RESUME_LABEL_DESCRIPTION_MAX - 1).trimEnd() + "…"
+    } else {
+        collapsed
+    }
+    return "$emoji $strand — $trimmed"
 }
 
 internal fun resumeStrand(project: Project, svc: GitStrands, strand: String) {

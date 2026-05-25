@@ -25,7 +25,7 @@ import kotlinx.serialization.json.put
 @State(name = "VibeStranding", storages = [Storage("vibe-stranding.xml")])
 class VibeStrandingSettings : PersistentStateComponent<VibeStrandingSettings.State> {
 
-    data class State(var resumeStrandsOnStartup: Boolean = true)
+    data class State(var resumeStrandsOnStartup: Boolean = true, var descriptionDelayMinutes: Int = 5)
 
     private var state = State()
 
@@ -39,6 +39,12 @@ class VibeStrandingSettings : PersistentStateComponent<VibeStrandingSettings.Sta
         get() = state.resumeStrandsOnStartup
         set(value) {
             state = state.copy(resumeStrandsOnStartup = value)
+        }
+
+    var descriptionDelayMinutes: Int
+        get() = state.descriptionDelayMinutes
+        set(value) {
+            state = state.copy(descriptionDelayMinutes = value)
         }
 
     /** JSON object keyed by [FIELDS] entry names, matching the MCP `settings` tool response shape. */
@@ -94,6 +100,18 @@ class VibeStrandingSettings : PersistentStateComponent<VibeStrandingSettings.Sta
                 read = { JsonPrimitive(it.resumeStrandsOnStartup) },
                 stageFromString = { settings, raw ->
                     raw.toBooleanStrictOrNull()?.let { value -> { settings.resumeStrandsOnStartup = value } }
+                },
+            ),
+            Field(
+                name = "descriptionDelayMinutes",
+                jsonType = "integer",
+                description = "Minutes to wait after a strand is created before the background job asks " +
+                    "the LM for a one-sentence description of what the strand is about. Strands with no " +
+                    "diff when the timer fires reschedule for the same interval. Default 5; must be >= 1.",
+                read = { JsonPrimitive(it.descriptionDelayMinutes) },
+                stageFromString = { settings, raw ->
+                    raw.toIntOrNull()?.takeIf { it >= 1 }
+                        ?.let { value -> { settings.descriptionDelayMinutes = value } }
                 },
             ),
         )

@@ -328,6 +328,21 @@ class GitStrands(private val project: Project) {
         return issues
     }
 
+    /**
+     * True when the strand has any committed work ahead of the default branch
+     * or any uncommitted change in the working tree. Used by the description
+     * generator to skip strands that haven't accumulated anything worth
+     * summarizing yet.
+     */
+    fun hasChangesSinceMain(strand: String): Boolean {
+        val wt = strandPath(strand)
+        if (!wt.exists()) return false
+        val dirty = git(wt, "status", "--porcelain")
+        if (dirty.ok && dirty.stdout.isNotEmpty()) return true
+        val ahead = git(wt, "rev-list", "--count", "${defaultBranch()}..HEAD").stdout.toIntOrNull() ?: 0
+        return ahead > 0
+    }
+
     fun finishStrand(strand: String): FinishResult {
         val main = mainCheckout()
         val wt = strandPath(strand)
@@ -370,6 +385,11 @@ class GitStrands(private val project: Project) {
         val main = mainCheckout()
         val wt = strandPath(strand)
         val branch = branchName(strand)
+
+        // Cancel any pending description generation before the worktree
+        // disappears — the job's own liveness check would otherwise let a
+        // racing timer fire against a half-deleted strand.
+        project.getService(StrandDescriber::class.java).cancel(strand)
 
         // Give the metadata store a chance to clean up before the worktree
         // (and thus the sidecar's gitdir, for the file backend) disappears.
