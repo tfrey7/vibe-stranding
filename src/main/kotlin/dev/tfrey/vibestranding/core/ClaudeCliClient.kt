@@ -1,4 +1,4 @@
-package dev.tfrey.vibestranding
+package dev.tfrey.vibestranding.core
 
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.CapturingProcessHandler
@@ -14,7 +14,7 @@ private val LOG = logger<ClaudeCliClientMarker>()
 private class ClaudeCliClientMarker
 
 /**
- * LM backend that shells out to the `claude` CLI in one-shot mode (`claude -p`).
+ * LLM backend that shells out to the `claude` CLI in one-shot mode (`claude -p`).
  *
  * Uses [GeneralCommandLine.ParentEnvironmentType.CONSOLE] so npm-global / mise
  * / asdf installs resolve the same way they would in the user's terminal —
@@ -22,19 +22,19 @@ private class ClaudeCliClientMarker
  * `bash -lc` would only source bash login config and miss zsh users who set
  * PATH in .zshrc / .zprofile, which is the common macOS setup.
  */
-object ClaudeCliClient : AgenticLmClient {
+object ClaudeCliClient : AgenticLlmClient {
 
-    override fun complete(prompt: String, tier: LmTier, timeoutMs: Int): LmResult =
+    override fun complete(prompt: String, tier: LlmTier, timeoutMs: Int): LlmResult =
         runClaude(prompt, tier, worktree = null, timeoutMs = timeoutMs)
 
-    override fun completeInWorktree(prompt: String, worktree: Path, tier: LmTier, timeoutMs: Int): LmResult =
+    override fun completeInWorktree(prompt: String, worktree: Path, tier: LlmTier, timeoutMs: Int): LlmResult =
         runClaude(prompt, tier, worktree = worktree, timeoutMs = timeoutMs)
 
-    private fun runClaude(prompt: String, tier: LmTier, worktree: Path?, timeoutMs: Int): LmResult {
+    private fun runClaude(prompt: String, tier: LlmTier, worktree: Path?, timeoutMs: Int): LlmResult {
         val params = buildList {
             // Claude Code accepts `haiku` / `sonnet` / `opus` as model aliases
             // that track the current generation, so we stay un-pinned.
-            if (tier == LmTier.Fast) {
+            if (tier == LlmTier.Fast) {
                 add("--model")
                 add("haiku")
             }
@@ -58,22 +58,22 @@ object ClaudeCliClient : AgenticLmClient {
             val elapsed = System.currentTimeMillis() - started
             LOG.info("claude -p subprocess: ${elapsed}ms (exit=${out.exitCode}, tier=$tier)")
             when {
-                out.isTimeout -> LmResult.Timeout(timeoutMs)
+                out.isTimeout -> LlmResult.Timeout(timeoutMs)
                 out.exitCode != 0 -> {
                     LOG.warn("claude -p exit ${out.exitCode}: ${out.stderr}")
                     val combined = (out.stdout + out.stderr).trim()
-                    LmResult.Error("claude exited with code ${out.exitCode}:\n\n$combined")
+                    LlmResult.Error("claude exited with code ${out.exitCode}:\n\n$combined")
                 }
                 else -> {
                     // Use stdout only on success — stderr carries warnings /
                     // progress that would corrupt the model's text answer.
                     val text = out.stdout.trim()
-                    if (text.isEmpty()) LmResult.Error("claude returned no output") else LmResult.Ok(text)
+                    if (text.isEmpty()) LlmResult.Error("claude returned no output") else LlmResult.Ok(text)
                 }
             }
         } catch (t: Throwable) {
             LOG.warn("claude -p failed to launch", t)
-            LmResult.Error("Failed to run claude: ${t.message}")
+            LlmResult.Error("Failed to run claude: ${t.message}")
         }
     }
 }

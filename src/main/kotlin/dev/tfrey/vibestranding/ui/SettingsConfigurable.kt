@@ -1,4 +1,4 @@
-package dev.tfrey.vibestranding
+package dev.tfrey.vibestranding.ui
 
 import com.intellij.openapi.options.BoundConfigurable
 import com.intellij.openapi.project.Project
@@ -7,13 +7,14 @@ import com.intellij.ui.dsl.builder.bindIntText
 import com.intellij.ui.dsl.builder.bindSelected
 import com.intellij.ui.dsl.builder.columns
 import com.intellij.ui.dsl.builder.panel
+import dev.tfrey.vibestranding.core.Settings
 
 /**
  * Settings → Tools → Vibe Stranding. Landing spot for per-project toggles.
  */
-class VibeStrandingConfigurable(private val project: Project) : BoundConfigurable("Vibe Stranding") {
+class SettingsConfigurable(private val project: Project) : BoundConfigurable("Vibe Stranding") {
     override fun createPanel(): DialogPanel {
-        val settings = VibeStrandingSettings.get(project)
+        val settings = Settings.get(project)
         return panel {
             row {
                 checkBox("Resume all strands when this project opens")

@@ -1,4 +1,4 @@
-package dev.tfrey.vibestranding
+package dev.tfrey.vibestranding.core
 
 import com.intellij.openapi.diagnostic.logger
 
@@ -14,9 +14,9 @@ private class StrandNamerService
  *  - [naiveSlug] is fully local and authoritative — the strand id (= dir
  *    + branch name) is always the naive slug of the user's description, so
  *    the tab name matches the on-disk identity.
- *  - [suggestEmoji] is best-effort: asks the configured [LmClient] (a Haiku-
- *    class model via [LmTier.Fast]) to pick a semantically meaningful single
- *    emoji. Any failure (LM unavailable, timeout, unparseable output) returns
+ *  - [suggestEmoji] is best-effort: asks the configured [LlmClient] (a Haiku-
+ *    class model via [LlmTier.Fast]) to pick a semantically meaningful single
+ *    emoji. Any failure (LLM unavailable, timeout, unparseable output) returns
  *    null and the caller falls back to [Actions.fallbackEmoji].
  */
 object StrandNamer {
@@ -30,10 +30,10 @@ Work: %s"""
 
     fun suggestEmoji(description: String): String? {
         val prompt = PROMPT_TEMPLATE.format(description)
-        val result = LmClients.client().complete(prompt, tier = LmTier.Fast, timeoutMs = TIMEOUT_MS)
+        val result = LlmClients.client().complete(prompt, tier = LlmTier.Fast, timeoutMs = TIMEOUT_MS)
         val text = when (result) {
-            is LmResult.Ok -> result.text
-            is LmResult.Timeout, is LmResult.Error -> return null
+            is LlmResult.Ok -> result.text
+            is LlmResult.Timeout, is LlmResult.Error -> return null
         }
         // Take the first non-empty line and strip common decorations
         // (quotes, backticks, surrounding whitespace). Haiku usually obeys
@@ -43,7 +43,7 @@ Work: %s"""
             .firstOrNull { it.isNotEmpty() }
             ?.trim('"', '\'', '`', ' ')
         if (emoji.isNullOrBlank()) {
-            LOG.warn("LM returned no usable emoji: $text")
+            LOG.warn("LLM returned no usable emoji: $text")
             return null
         }
         return emoji

@@ -1,8 +1,10 @@
-package dev.tfrey.vibestranding
+package dev.tfrey.vibestranding.ui
 
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
+import dev.tfrey.vibestranding.core.GitStrands
+import dev.tfrey.vibestranding.core.Settings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -10,7 +12,7 @@ import kotlinx.coroutines.withContext
  * On project open, reopen a terminal tab for every existing strand so each
  * worktree's claude session picks up where it left off (`claude --continue`,
  * matching the manual Resume Strand action). Gated by
- * [VibeStrandingSettings.resumeStrandsOnStartup], which defaults to true.
+ * [Settings.resumeStrandsOnStartup], which defaults to true.
  *
  * Each [resumeStrand] call already wraps its git/symlink/hook work in a
  * background task, so this activity just kicks them off and returns; the
@@ -21,7 +23,7 @@ import kotlinx.coroutines.withContext
  */
 class ResumeAllStrandsActivity : ProjectActivity {
     override suspend fun execute(project: Project) {
-        if (!VibeStrandingSettings.get(project).resumeStrandsOnStartup) return
+        if (!Settings.get(project).resumeStrandsOnStartup) return
         val svc = project.getService(GitStrands::class.java)
         val strands = svc.listStrands()
         if (strands.isEmpty()) return

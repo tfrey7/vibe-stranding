@@ -56,6 +56,44 @@ Don't add a second version string elsewhere.
 - `./gradlew buildPlugin` is the canonical build. Don't hand-zip from
   `build/libs/`.
 
+## Naming
+
+Don't prefix class names with `VibeStranding` (or any other variant of the
+plugin name). The package `dev.tfrey.vibestranding` already namespaces
+everything inside it — `VibeStrandingSettings` is just `Settings`, the menu
+group is `MenuGroup`, the configurable is `SettingsConfigurable`. Same rule
+for any future plugin-prefixed names: prefer the unqualified noun.
+
+User-facing strings (action labels, notification group ID, `@State(name=…)`,
+`plugin.xml` action IDs) keep `Vibe Stranding` / `VibeStranding` — those are
+not class names and changing them would orphan existing per-user settings
+and break menu wiring.
+
+Use **`Llm`** (not `Lm`) for anything referring to large language models —
+the type, the client, results, tiers. `LM` reads as a typo to most readers
+even though academic NLP uses it for "language model."
+
+## Package layout
+
+Three subpackages under `dev.tfrey.vibestranding`:
+
+- **`core/`** — pure domain logic: `GitStrands`, `StrandMetadata`,
+  `StrandNamer`, `StrandConventions` (regex / commands / palette /
+  fallback emoji / tab label), `Llm` interfaces, `ClaudeCliClient`. No
+  IntelliJ extension classes (`AnAction`, `ToolWindowFactory`, etc.) and
+  ideally no Swing imports. Allowed to use IntelliJ platform infrastructure
+  like `Service`, `GeneralCommandLine`, `BuiltInServerManager`, `logger`.
+- **`ui/`** — IntelliJ extensions: actions, menu groups, settings UI, tool
+  windows, terminal-tab control, startup activities. May depend on `core/`.
+- **`mcp/`** — the external HTTP/MCP server (`HttpHandler`). May depend on
+  `core/` and on `ui/TerminalTabs` (the MCP tools need to manipulate tabs
+  the same way the actions do).
+
+If a piece of "domain" data lives in `ui/` only because that's where the
+first caller was, lift it to `core/` rather than crossing the `mcp → ui`
+boundary for it — that's the rule that put `STRAND_NAME` /
+`STRAND_COMMAND` / `tabLabel` / etc. into `core/StrandConventions.kt`.
+
 ## Threading (EDT vs background)
 
 EDT violations only show up at runtime — `Slow operations are prohibited

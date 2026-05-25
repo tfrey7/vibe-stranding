@@ -1,8 +1,20 @@
-package dev.tfrey.vibestranding
+package dev.tfrey.vibestranding.mcp
 
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.ProjectManager
+import dev.tfrey.vibestranding.core.GitStrands
+import dev.tfrey.vibestranding.core.RESUME_COMMAND
+import dev.tfrey.vibestranding.core.STRAND_COMMAND
+import dev.tfrey.vibestranding.core.STRAND_NAME
+import dev.tfrey.vibestranding.core.Settings
+import dev.tfrey.vibestranding.core.StrandDescriber
+import dev.tfrey.vibestranding.core.StrandMeta
+import dev.tfrey.vibestranding.core.StrandNamer
+import dev.tfrey.vibestranding.core.fallbackEmoji
+import dev.tfrey.vibestranding.core.pickStrandBackground
+import dev.tfrey.vibestranding.core.tabLabel
+import dev.tfrey.vibestranding.ui.TerminalTabs
 import io.netty.buffer.Unpooled
 import io.netty.channel.ChannelFutureListener
 import io.netty.channel.ChannelHandlerContext
@@ -291,11 +303,11 @@ class HttpHandler : HttpRequestHandler() {
 
     /**
      * Read with no setting args, or atomically update any subset of
-     * [VibeStrandingSettings.FIELDS] keys and return the new state. The
+     * [Settings.FIELDS] keys and return the new state. The
      * `project` param is filtered out so it isn't treated as a setting.
      */
     private fun doSettings(project: Project, params: Map<String, String>): OpResult {
-        val settings = VibeStrandingSettings.get(project)
+        val settings = Settings.get(project)
         val updates = params.filterKeys { it != "project" }
         if (updates.isNotEmpty()) {
             val errors = settings.applyUpdates(updates)
@@ -704,7 +716,7 @@ class HttpHandler : HttpRequestHandler() {
                             "the whole call without mutating anything. Returns the (possibly updated) " +
                             "settings as JSON.\n\nSettings:",
                     )
-                    VibeStrandingSettings.FIELDS.forEach {
+                    Settings.FIELDS.forEach {
                         append(
                             "\n- ",
                         ).append(it.name).append(" (").append(it.jsonType).append("): ").append(it.description)
@@ -714,7 +726,7 @@ class HttpHandler : HttpRequestHandler() {
             putJsonObject("inputSchema") {
                 put("type", "object")
                 putJsonObject("properties") {
-                    VibeStrandingSettings.FIELDS.forEach { field ->
+                    Settings.FIELDS.forEach { field ->
                         putJsonObject(field.name) {
                             put("type", field.jsonType)
                             put("description", field.description)

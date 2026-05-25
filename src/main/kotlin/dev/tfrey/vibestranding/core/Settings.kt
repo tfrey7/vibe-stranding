@@ -1,4 +1,4 @@
-package dev.tfrey.vibestranding
+package dev.tfrey.vibestranding.core
 
 import com.intellij.openapi.components.PersistentStateComponent
 import com.intellij.openapi.components.Service
@@ -23,7 +23,7 @@ import kotlinx.serialization.json.put
  */
 @Service(Service.Level.PROJECT)
 @State(name = "VibeStranding", storages = [Storage("vibe-stranding.xml")])
-class VibeStrandingSettings : PersistentStateComponent<VibeStrandingSettings.State> {
+class Settings : PersistentStateComponent<Settings.State> {
 
     data class State(var resumeStrandsOnStartup: Boolean = true, var descriptionDelayMinutes: Int = 5)
 
@@ -49,7 +49,7 @@ class VibeStrandingSettings : PersistentStateComponent<VibeStrandingSettings.Sta
 
     /** JSON object keyed by [FIELDS] entry names, matching the MCP `settings` tool response shape. */
     fun snapshot(): JsonObject = buildJsonObject {
-        FIELDS.forEach { put(it.name, it.read(this@VibeStrandingSettings)) }
+        FIELDS.forEach { put(it.name, it.read(this@Settings)) }
     }
 
     /**
@@ -81,14 +81,14 @@ class VibeStrandingSettings : PersistentStateComponent<VibeStrandingSettings.Sta
         val name: String,
         val jsonType: String,
         val description: String,
-        val read: (VibeStrandingSettings) -> JsonElement,
+        val read: (Settings) -> JsonElement,
         // null = raw value won't coerce; otherwise a deferred apply so the
         // caller can validate-all-then-apply-all.
-        val stageFromString: (VibeStrandingSettings, String) -> (() -> Unit)?,
+        val stageFromString: (Settings, String) -> (() -> Unit)?,
     )
 
     companion object {
-        fun get(project: Project): VibeStrandingSettings = project.getService(VibeStrandingSettings::class.java)
+        fun get(project: Project): Settings = project.getService(Settings::class.java)
 
         /** Add an entry here to expose a new setting over MCP/REST. */
         val FIELDS: List<Field> = listOf(
@@ -106,7 +106,7 @@ class VibeStrandingSettings : PersistentStateComponent<VibeStrandingSettings.Sta
                 name = "descriptionDelayMinutes",
                 jsonType = "integer",
                 description = "Minutes to wait after a strand is created before the background job asks " +
-                    "the LM for a one-sentence description of what the strand is about. Strands with no " +
+                    "the LLM for a one-sentence description of what the strand is about. Strands with no " +
                     "diff when the timer fires reschedule for the same interval. Default 5; must be >= 1.",
                 read = { JsonPrimitive(it.descriptionDelayMinutes) },
                 stageFromString = { settings, raw ->

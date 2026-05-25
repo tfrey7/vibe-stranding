@@ -1,4 +1,4 @@
-package dev.tfrey.vibestranding
+package dev.tfrey.vibestranding.core
 
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.CapturingProcessHandler
@@ -230,8 +230,8 @@ class GitStrands(private val project: Project) {
      * [WorktreeSidecarStore] via the lambda passed at construction.
      *
      * Computed directly from the known worktree layout rather than via
-     * `git rev-parse --git-path` because this path is read from
-     * [ResumeStrandsGroup.getChildren] during action-update, and IntelliJ holds
+     * `git rev-parse --git-path` because this path is read from the
+     * Resume Strand action group during action-update, and IntelliJ holds
      * a ReadAction across that callback — under which `OSProcessHandler`
      * refuses synchronous execution.
      */

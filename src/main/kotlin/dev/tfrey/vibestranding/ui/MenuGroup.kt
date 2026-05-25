@@ -1,4 +1,4 @@
-package dev.tfrey.vibestranding
+package dev.tfrey.vibestranding.ui
 
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -9,7 +9,7 @@ import com.intellij.openapi.actionSystem.DefaultActionGroup
  * running in an IntelliJ sandbox. Lets you tell which strand spawned the dev
  * IDE at a glance, while production installs keep the plain "Vibe Stranding".
  */
-class VibeStrandingMenuGroup : DefaultActionGroup() {
+class MenuGroup : DefaultActionGroup() {
 
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 

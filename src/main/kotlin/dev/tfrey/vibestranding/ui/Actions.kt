@@ -1,4 +1,4 @@
-package dev.tfrey.vibestranding
+package dev.tfrey.vibestranding.ui
 
 import com.intellij.ide.impl.OpenProjectTask
 import com.intellij.ide.impl.ProjectUtil
@@ -16,76 +16,21 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
+import dev.tfrey.vibestranding.core.GitStrands
+import dev.tfrey.vibestranding.core.LlmClients
+import dev.tfrey.vibestranding.core.LlmResult
+import dev.tfrey.vibestranding.core.RESUME_COMMAND
+import dev.tfrey.vibestranding.core.STRAND_COMMAND
+import dev.tfrey.vibestranding.core.SUMMARIZE_PROMPT
+import dev.tfrey.vibestranding.core.StrandDescriber
+import dev.tfrey.vibestranding.core.StrandMeta
+import dev.tfrey.vibestranding.core.StrandNamer
+import dev.tfrey.vibestranding.core.fallbackEmoji
+import dev.tfrey.vibestranding.core.pickStrandBackground
+import dev.tfrey.vibestranding.core.tabLabel
 import kotlin.io.path.exists
-import kotlin.math.abs
 
 private val LOG = logger<NewStrandAction>()
-
-internal val STRAND_NAME = Regex("^[a-z0-9][a-z0-9-]*$")
-
-// What runs in the new tab. Change to taste (e.g. "claude --resume").
-internal const val STRAND_COMMAND = "claude"
-
-// What runs when reopening a tab for an existing strand. `--continue` picks
-// up the most recent claude session in that worktree without a picker; the
-// `|| claude` fallback handles strands with no prior session (e.g. created
-// then closed without interacting), where `--continue` would otherwise error.
-internal const val RESUME_COMMAND = "claude --continue || claude"
-
-// Prompt sent to a one-shot `claude -p` invocation inside the strand's worktree.
-// The subprocess has no prior conversation context, but it does have the
-// worktree on disk plus shell tools, so we point it at `git log` / `git diff`
-// as the source of truth for what the strand actually changed.
-internal const val SUMMARIZE_PROMPT =
-    "Summarize the work done on this strand so far — what changed, why, and what state it's in. " +
-        "Use git log and git diff against main as your source of truth. Keep it under 200 words."
-
-// Fallback emoji palette used while we're waiting on claude haiku to pick
-// a semantic one (or forever, when claude isn't on PATH). Hash-based so
-// repeated reads on the same strand pick the same color.
-private val MARKERS = listOf(
-    "🔵",
-    "🟢",
-    "🟡",
-    "🟠",
-    "🔴",
-    "🟣",
-    "🟤",
-    "⚪",
-)
-
-internal fun fallbackEmoji(strand: String): String = MARKERS[abs(strand.hashCode()) % MARKERS.size]
-
-// Fixed palette of terminal background tints. Targeted around L≈20% so they
-// sit just above the default Darcula terminal background (~#2B2B2B) — dark
-// enough that Claude's orange/yellow UI accents still read clearly, but
-// tinted enough to tell "the purple one" from "the green one" at a glance.
-// We rotate (least-used-first) at strand-create time so siblings pick
-// different colors; duplicates are allowed once we wrap around.
-internal val STRAND_BACKGROUNDS = listOf(
-    "#1F2A3D", // deep navy
-    "#1F2F25", // deep forest
-    "#33291A", // deep amber
-    "#33201F", // deep rust
-    "#291F33", // deep plum
-    "#2D241A", // deep umber
-    "#1A2E2C", // deep teal
-    "#2D1F2A", // deep mauve
-)
-
-/**
- * Pick the next strand background by counting existing usages and returning
- * the first palette entry with the lowest count. Ties go to palette order,
- * so siblings created in sequence cycle through colors deterministically.
- */
-internal fun pickStrandBackground(existing: List<String>): String {
-    val counts = STRAND_BACKGROUNDS.associateWith { color -> existing.count { it == color } }
-    val min = counts.values.min()
-    return STRAND_BACKGROUNDS.first { counts[it] == min }
-}
-
-/** Tab label format: `"<emoji> <strand>"` — strand id is always the tab name. */
-internal fun tabLabel(emoji: String, strand: String): String = "$emoji $strand"
 
 private fun notify(project: Project, content: String, type: NotificationType) {
     NotificationGroupManager.getInstance()
@@ -375,7 +320,7 @@ class FinishThisStrandAction : AnAction() {
 }
 
 /**
- * Asks the configured [AgenticLmClient] to summarize the strand using
+ * Asks the configured [AgenticLlmClient] to summarize the strand using
  * filesystem tools (`git log` / `git diff`) and renders the result in the
  * Vibe Stranding Summary tool window. The strand's live claude session is
  * untouched.
@@ -393,15 +338,15 @@ class SummarizeThisStrandAction : AnAction() {
 
         onEdt { showStrandSummary(project, strand, "Summarizing '$strand'…") }
         runInBackground(project, "Summarizing '$strand'") {
-            val result = LmClients.agentic().completeInWorktree(
+            val result = LlmClients.agentic().completeInWorktree(
                 prompt = SUMMARIZE_PROMPT,
                 worktree = worktree,
                 timeoutMs = SUMMARY_TIMEOUT_MS,
             )
             val output = when (result) {
-                is LmResult.Ok -> result.text
-                is LmResult.Timeout -> "Summary timed out after ${result.afterMs / 1000}s."
-                is LmResult.Error -> result.message
+                is LlmResult.Ok -> result.text
+                is LlmResult.Timeout -> "Summary timed out after ${result.afterMs / 1000}s."
+                is LlmResult.Error -> result.message
             }
             onEdt { showStrandSummary(project, strand, output) }
         }

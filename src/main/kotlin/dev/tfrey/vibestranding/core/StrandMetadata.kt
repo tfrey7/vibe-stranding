@@ -1,4 +1,4 @@
-package dev.tfrey.vibestranding
+package dev.tfrey.vibestranding.core
 
 import com.intellij.openapi.diagnostic.logger
 import kotlinx.serialization.json.Json

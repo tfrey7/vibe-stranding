@@ -1,15 +1,15 @@
-package dev.tfrey.vibestranding
+package dev.tfrey.vibestranding.core
 
 import java.nio.file.Path
 
 /** Capability tier — backends map this to a concrete model id. */
-enum class LmTier { Fast, Default }
+enum class LlmTier { Fast, Default }
 
-/** Result of an LM call. Implementations are responsible for logging detail. */
-sealed interface LmResult {
-    data class Ok(val text: String) : LmResult
-    data class Timeout(val afterMs: Int) : LmResult
-    data class Error(val message: String) : LmResult
+/** Result of an LLM call. Implementations are responsible for logging detail. */
+sealed interface LlmResult {
+    data class Ok(val text: String) : LlmResult
+    data class Timeout(val afterMs: Int) : LlmResult
+    data class Error(val message: String) : LlmResult
 }
 
 /**
@@ -20,8 +20,8 @@ sealed interface LmResult {
  *  - Future: direct API clients (Anthropic / OpenAI / …) gated on a
  *    user-provided key, faster than the CLI fork for short prompts.
  */
-interface LmClient {
-    fun complete(prompt: String, tier: LmTier = LmTier.Default, timeoutMs: Int): LmResult
+interface LlmClient {
+    fun complete(prompt: String, tier: LlmTier = LlmTier.Default, timeoutMs: Int): LlmResult
 }
 
 /**
@@ -31,16 +31,16 @@ interface LmClient {
  * rather than us pre-stuffing context. Only backends with tool use can
  * implement this; currently just [ClaudeCliClient].
  */
-interface AgenticLmClient : LmClient {
-    fun completeInWorktree(prompt: String, worktree: Path, tier: LmTier = LmTier.Default, timeoutMs: Int): LmResult
+interface AgenticLlmClient : LlmClient {
+    fun completeInWorktree(prompt: String, worktree: Path, tier: LlmTier = LlmTier.Default, timeoutMs: Int): LlmResult
 }
 
 /**
- * Resolves the active LM backend(s). Single seam for future settings-driven
+ * Resolves the active LLM backend(s). Single seam for future settings-driven
  * selection (Anthropic API key, OpenAI API key, …). For now, both methods
  * return [ClaudeCliClient].
  */
-object LmClients {
-    fun client(): LmClient = ClaudeCliClient
-    fun agentic(): AgenticLmClient = ClaudeCliClient
+object LlmClients {
+    fun client(): LlmClient = ClaudeCliClient
+    fun agentic(): AgenticLlmClient = ClaudeCliClient
 }

@@ -1,4 +1,4 @@
-package dev.tfrey.vibestranding
+package dev.tfrey.vibestranding.core
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
@@ -23,7 +23,7 @@ private const val DESCRIBE_TIMEOUT_MS = 3 * 60 * 1000
  * The strand id alone ("oauth-cleanup") and the user's create-time prompt
  * are both thin signals — the real "what is this strand about" only becomes
  * legible once some code has been written. This service schedules a single
- * [LmClient] call per strand a few minutes after creation, feeds it the
+ * [LlmClient] call per strand a few minutes after creation, feeds it the
  * worktree + git history, and writes the resulting blurb back to the
  * strand's [StrandMeta.generatedDescription].
  *
@@ -42,7 +42,7 @@ class StrandDescriber(private val project: Project) : Disposable {
 
     /** Safe to call from any thread. */
     fun schedule(strand: String) {
-        val delayMinutes = VibeStrandingSettings.get(project).descriptionDelayMinutes.coerceAtLeast(1)
+        val delayMinutes = Settings.get(project).descriptionDelayMinutes.coerceAtLeast(1)
         pending.compute(strand) { _, existing ->
             existing?.cancel(false)
             AppExecutorUtil.getAppScheduledExecutorService().schedule(
@@ -100,20 +100,20 @@ Use `git log` and `git diff` against the default branch as your source of truth 
 Output the sentence(s) only — no quotes, no code fences, no labels, no prose around it.
 """
         return when (
-            val r = LmClients.agentic().completeInWorktree(
+            val r = LlmClients.agentic().completeInWorktree(
                 prompt,
                 worktree,
-                LmTier.Default,
+                LlmTier.Default,
                 DESCRIBE_TIMEOUT_MS,
             )
         ) {
-            is LmResult.Ok -> r.text.trim().trim('"', '\'', '`').takeIf { it.isNotBlank() }
-            is LmResult.Timeout -> {
-                LOG.warn("Description LM call for '$strand' timed out after ${r.afterMs}ms.")
+            is LlmResult.Ok -> r.text.trim().trim('"', '\'', '`').takeIf { it.isNotBlank() }
+            is LlmResult.Timeout -> {
+                LOG.warn("Description LLM call for '$strand' timed out after ${r.afterMs}ms.")
                 null
             }
-            is LmResult.Error -> {
-                LOG.warn("Description LM call for '$strand' failed: ${r.message}")
+            is LlmResult.Error -> {
+                LOG.warn("Description LLM call for '$strand' failed: ${r.message}")
                 null
             }
         }

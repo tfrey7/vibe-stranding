@@ -15,49 +15,49 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup id="Vibe Stranding" displayType="BALLOON"/>
-        <httpRequestHandler implementation="dev.tfrey.vibestranding.HttpHandler"/>
+        <httpRequestHandler implementation="dev.tfrey.vibestranding.mcp.HttpHandler"/>
         <toolWindow id="Vibe Stranding Summary"
                     anchor="right"
                     secondary="true"
                     icon="/icons/vibe-stranding.svg"
-                    factoryClass="dev.tfrey.vibestranding.StrandSummaryToolWindowFactory"/>
-        <postStartupActivity implementation="dev.tfrey.vibestranding.ResumeAllStrandsActivity"/>
-        <postStartupActivity implementation="dev.tfrey.vibestranding.StrandDescriberStartupActivity"/>
+                    factoryClass="dev.tfrey.vibestranding.ui.StrandSummaryToolWindowFactory"/>
+        <postStartupActivity implementation="dev.tfrey.vibestranding.ui.ResumeAllStrandsActivity"/>
+        <postStartupActivity implementation="dev.tfrey.vibestranding.core.StrandDescriberStartupActivity"/>
         <projectConfigurable id="dev.tfrey.vibestranding.settings"
                              parentId="tools"
                              displayName="Vibe Stranding"
-                             instance="dev.tfrey.vibestranding.VibeStrandingConfigurable"/>
-        <!-- GitStrands and VibeStrandingSettings are @Service(PROJECT); no registration needed. -->
+                             instance="dev.tfrey.vibestranding.ui.SettingsConfigurable"/>
+        <!-- GitStrands and Settings are @Service(PROJECT); no registration needed. -->
     </extensions>
 
     <actions>
-        <group id="VibeStranding.Menu" class="dev.tfrey.vibestranding.VibeStrandingMenuGroup" text="Vibe Stranding" popup="true" icon="/icons/vibe-stranding.svg">
+        <group id="VibeStranding.Menu" class="dev.tfrey.vibestranding.ui.MenuGroup" text="Vibe Stranding" popup="true" icon="/icons/vibe-stranding.svg">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <!-- Also surface the group as a dropdown button on the Terminal
                  tool window's toolbar, so users don't have to dig into Tools. -->
             <add-to-group group-id="TerminalToolwindowActionGroup" anchor="last"/>
             <action id="VibeStranding.New"
-                    class="dev.tfrey.vibestranding.NewStrandAction"
+                    class="dev.tfrey.vibestranding.ui.NewStrandAction"
                     text="New Strand..."
                     description="Create a worktree and terminal tab for a new strand of work"/>
             <group id="VibeStranding.Resume"
-                   class="dev.tfrey.vibestranding.ResumeStrandsGroup"
+                   class="dev.tfrey.vibestranding.ui.ResumeStrandsGroup"
                    text="Resume Strand"/>
             <separator/>
             <action id="VibeStranding.ViewCode"
-                    class="dev.tfrey.vibestranding.ViewThisStrandsCodeAction"
+                    class="dev.tfrey.vibestranding.ui.ViewThisStrandsCodeAction"
                     text="View This Strand's Code"
                     description="Open the focused tab's strand worktree as a project in a new IDE window"/>
             <action id="VibeStranding.SummarizeThis"
-                    class="dev.tfrey.vibestranding.SummarizeThisStrandAction"
+                    class="dev.tfrey.vibestranding.ui.SummarizeThisStrandAction"
                     text="Summarize This Strand"
                     description="Ask the strand's claude session to summarize the work done so far"/>
             <action id="VibeStranding.FinishThis"
-                    class="dev.tfrey.vibestranding.FinishThisStrandAction"
+                    class="dev.tfrey.vibestranding.ui.FinishThisStrandAction"
                     text="Finish This Strand"
                     description="Land the strand owning the focused terminal tab onto the default branch, then delete it"/>
             <action id="VibeStranding.DeleteThis"
-                    class="dev.tfrey.vibestranding.DeleteThisStrandAction"
+                    class="dev.tfrey.vibestranding.ui.DeleteThisStrandAction"
                     text="Delete This Strand"
                     description="Delete the strand owning the focused terminal tab without finishing it"/>
         </group>
